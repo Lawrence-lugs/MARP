@@ -1,0 +1,79 @@
+#%%
+
+import onnx
+from onnx import numpy_helper as nphelp
+import numpy as np
+from torchvision import models,transforms
+from PIL import Image
+import matplotlib.pyplot as plt
+import splitter, cnodes, cgraph
+
+print(f'Running ONNX version {onnx.__version__}')
+
+nx_model = onnx.load('onnx_models/mbv2.onnx')
+
+cgraph_UUT = cgraph.cgraph.from_onnx_model(nx_model)
+
+img = Image.open('onnx_models/dog4.png')
+img_tensor = transforms.ToTensor()(img).float()
+tensor_input = img_tensor.unsqueeze(0)
+img_array = np.array(img_tensor)
+
+input_dict = dict()
+input_dict['input.1'] = img_array
+
+out = cgraph_UUT.forward(input_dict)
+
+def test_mbv2_cgraph():
+
+    cgraph_predictions = np.array(out[0],dtype=float)
+    onnx_predictions = np.load(r'C:\Users\Lawrence\lawrence-workspace\aimc-tasks\onnx_models\dog_norm_mbv2_outputs.npy').squeeze()
+
+    # cgraph outputs same as onnx outputs
+    assert np.allclose(cgraph_predictions,onnx_predictions,rtol=1e-2)
+
+def test_conv_splitter():
+
+    node_UUT = cgraph_UUT.nodes[-5]
+
+    chx = splitter.split_conv_into_chunks(node_UUT,256,256)
+    chx_UUT = cgraph.cgraph(chx)
+    test_key = node_UUT.inputs[0]
+    test_array = cgraph_UUT.edges[node_UUT.inputs[0]]
+    
+    split_lastconv_fmap = chx_UUT.forward({test_key:test_array})
+    split_lastconv_fmap = np.array(split_lastconv_fmap,dtype=float)
+
+    # last convolution's outputs musts still be 
+    assert np.allclose(split_lastconv_fmap,cgraph_UUT.edges[node_UUT.outputs[0]],rtol=1e-2)
+
+def test_gemm_splitter():
+
+    node_UUT = cgraph_UUT.nodes[-1]
+    cgraph_predictions = np.array(out[0],dtype=float)
+    chx = splitter.split_gemm_into_chunks(node_UUT,256,256)
+
+    chx_UUT = cgraph.cgraph(chx)
+
+    test_key = node_UUT.inputs[0]
+    test_array = cgraph_UUT.edges[node_UUT.inputs[0]]
+    
+    split_gemm_logits = chx_UUT.forward({test_key:test_array})
+    split_gemm_logits = np.array(split_gemm_logits,dtype=float)
+
+    assert np.allclose(split_gemm_logits,cgraph_predictions,rtol=1e-2)
+
+def test_split_mbv2_graph():
+    '''
+    TODO: Parametrize this test
+    '''
+
+    W = 256
+    H = 256
+
+    split_cgraph_UUT = cgraph.split_convolutions(cgraph_UUT,H=H,W=W)
+    split_cgraph_logits = split_cgraph_UUT.forward(input_dict)
+    split_cgraph_logits = np.array(split_cgraph_logits,dtype=float)
+    
+    onnx_predictions = np.load(r'C:\Users\Lawrence\lawrence-workspace\aimc-tasks\onnx_models\dog_norm_mbv2_outputs.npy').squeeze()
+    assert np.allclose(split_cgraph_logits,onnx_predictions)
