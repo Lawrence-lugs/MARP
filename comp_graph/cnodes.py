@@ -124,6 +124,8 @@ class conv_node(node):
 
         input: C,H,W tensor
         '''
+        input = np.array(input).squeeze()
+
         if self.in_channel is not None:
             input = np.expand_dims(input[self.in_channel],0)
 
@@ -171,6 +173,7 @@ class clip_node(node):
         return clip_node(inputs,outputs,range)
     
     def forward(self,input:np.array):
+        input = np.array(input).squeeze()
         return np.clip(input,self.range[0],self.range[1])
     
 class add_node(node):
@@ -191,7 +194,7 @@ class add_node(node):
         return add_node(inputs,outputs)
     
     def forward(self,inputs:list[np.ndarray]):
-        inputs = np.array(inputs)
+        inputs = np.array(inputs).squeeze()
         return np.sum(inputs,axis=0)
 
 class cat_node(node):
@@ -209,8 +212,7 @@ class cat_node(node):
         Returns the input if the concat axis is not in the range or self.axis is unspecified.
         '''
         if self.axis is None:
-            return inputs
-        if self.axis > len(inputs.shape):
+            inputs = np.array(inputs).squeeze()
             return inputs
         return np.concatenate(inputs,axis=self.axis)
     
@@ -233,6 +235,7 @@ class global_avg_node(node):
         return global_avg_node(inputs,outputs)
     
     def forward(self,inputs:np.array):
+        inputs = np.array(inputs).squeeze()
         return np.average(inputs,axis=(1,2))
     
 class flatten_node(node):
@@ -253,6 +256,7 @@ class flatten_node(node):
         return flatten_node(inputs,outputs)
     
     def forward(self,inputs:np.array):        
+        inputs = np.array(inputs).squeeze()
         return inputs.flatten()
 
 class gemm_node(node):
@@ -283,6 +287,7 @@ class gemm_node(node):
 
         input: vector
         '''
+        input = np.array(input).squeeze()
         out = (input @ self.matrix) + self.biases
 
         return out
@@ -303,6 +308,7 @@ class toeplitzizer_node(node):
 
         input: vector
         '''
+        input = np.array(input).squeeze()
         out = toeplitzize_input(input,ksize=self.ksize,strides=self.strides)
         return out
     
@@ -317,6 +323,7 @@ class slicer_node(node):
         self.col_lim = col_lim
 
     def forward(self,input:np.array):
+        input = np.array(input).squeeze()
         if len(input.shape) == 1:
             lim = self.col_lim if self.row_lim == [None,None] else self.row_lim
             return input[lim[0]:lim[1]]
@@ -331,6 +338,7 @@ class reshaper_node(node):
         self.channels = channels
 
     def forward(self,input:np.array):
+        input = np.array(input).squeeze()
         C = self.channels
         H = int(np.sqrt(input.shape[0]))
         W = H

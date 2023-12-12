@@ -4,6 +4,7 @@ import numpy as np
 import cnodes
 from tqdm import tqdm
 import splitter
+import rectpack
 
 class cgraph(object):
     '''
@@ -93,7 +94,6 @@ class cgraph(object):
             
             # Squeeze eliminates extra dimension if there's only one input
             # This causes ragged nested arrays sometimes. 
-            in_array = np.array(in_array).squeeze()
 
             out_array = node.forward(in_array)
             for output in node.outputs:
@@ -104,6 +104,17 @@ class cgraph(object):
             output_keys = self.nodes[-1].outputs
 
         return [self.edges[x] for x in output_keys]
+    
+    def _get_shape_list_id(self):
+        '''
+        Obtains the list of shapes of all matrix-containing nodes
+        and assigns an ID to each depending on their position in the node list
+        '''
+        shapes = []
+        for id,node in enumerate(self.nodes):
+            if hasattr(node,"matrix"):
+                shapes.append( (*node.matrix.shape,id) )
+        return shapes
 
 def split_convolutions(in_cgraph:cgraph,H:int,W:int):
 
@@ -113,7 +124,7 @@ def split_convolutions(in_cgraph:cgraph,H:int,W:int):
         if type(node) == cnodes.conv_node:
             replacements = splitter.split_conv_into_chunks(node,H,W)
             new_nodes.extend(replacements)
-        if type(node) == cnodes.gemm_node:
+        elif type(node) == cnodes.gemm_node:
             replacements = splitter.split_gemm_into_chunks(node,H,W)
             new_nodes.extend(replacements)
         else:

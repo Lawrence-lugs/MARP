@@ -56,7 +56,7 @@ def split_conv_into_chunks(cnode:cnodes.conv_node,H:int,W:int):
     ksize = cnode.kernel.shape[-1]
     strides = cnode.strides
 
-    if len(submatrices) == 1:
+    if len(submatrices) == 1 and len(submatrices[0]) == 1:
         return [cnode]
 
     nodes = []
@@ -90,14 +90,16 @@ def split_conv_into_chunks(cnode:cnodes.conv_node,H:int,W:int):
         #apply bias to the last matrices
         nodes[-1].biases = subbiases[i]
 
-        adder_output_edge = f'{cnode.outputs[0]}_adder_{i}'
-        adder = cnodes.add_node(adder_inputs,[adder_output_edge])
-        nodes.append(adder)
-
-        cat_inputs.append(adder_output_edge)
+        if len(adder_inputs) > 1:
+            adder_output_edge = f'{cnode.outputs[0]}_adder_{i}'
+            adder = cnodes.add_node(adder_inputs,[adder_output_edge])
+            nodes.append(adder)
+            cat_inputs.append(adder_output_edge)
+        else:
+            cat_inputs.extend(adder_inputs)
 
     cat_output_edge = f'{cnode.outputs[0]}_cat'
-    cat = cnodes.cat_node(cat_inputs,[cat_output_edge],axis=0)
+    cat = cnodes.cat_node(cat_inputs,[cat_output_edge],axis=-1)
     nodes.append(cat)
 
     C = cnode.matrix.shape[1]
