@@ -1,5 +1,38 @@
 import numpy as np
-import cnodes
+from . import cnodes
+
+def split_shapelist_into_chunks(shapelist,H,W):
+    outlist = []
+    for shape in shapelist:
+        chunk_shape_list = split_shape_into_chunks(shape,H,W)
+        outlist.extend(np.array(chunk_shape_list).reshape(-1,2))
+    return outlist
+
+def split_shape_into_chunks(shape,H,W):
+    '''
+    Like split_matrix_into_chunks, but works with just shapes.
+    '''
+    matrix = np.empty(shape) 
+    out = []
+    if matrix.shape[1] > W:
+        reps = matrix.shape[1]//W + (matrix.shape[1]%W!=0) #ceil func
+        for i in range(reps):
+            out.append(matrix[:,W*i:W*i+W])
+    else:
+        out.append(matrix)
+
+    out2 = []
+    for i,mat in enumerate(out):
+        out_col = []
+        if mat.shape[0] > H:
+            reps = mat.shape[0]//H + (mat.shape[0]%H!=0) #ceil func
+            for i in range(reps):
+                out_col.append(mat[H*i:H*i+H])
+        else:
+            out_col.append(mat)
+        out2.append(out_col)
+
+    return [[i.shape for i in c] for c in out2]
 
 def split_matrix_into_chunks(matrix,H,W):
     '''

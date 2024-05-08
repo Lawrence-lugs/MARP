@@ -1,9 +1,9 @@
 import onnx
 from onnx import numpy_helper as nphelp
 import numpy as np
-import cnodes
+from . import cnodes
 from tqdm import tqdm
-import splitter
+from . import splitter
 import rectpack
 
 class cgraph(object):
