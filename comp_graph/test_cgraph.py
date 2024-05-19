@@ -12,7 +12,7 @@ print(f'Running ONNX version {onnx.__version__}')
 
 nx_model = onnx.load('onnx_models/mbv2.onnx')
 
-cgraph_UUT = cgraph.cgraph.from_onnx_model(nx_model)
+cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model)
 
 img = Image.open('onnx_models/dog4.png')
 img_tensor = transforms.ToTensor()(img).float()
@@ -37,7 +37,7 @@ def test_conv_splitter():
     node_UUT = cgraph_UUT.nodes[-5]
 
     chx = splitter.split_conv_into_chunks(node_UUT,256,256)
-    chx_UUT = cgraph.cgraph(chx)
+    chx_UUT = cgraph.Cgraph(chx)
     test_key = node_UUT.inputs[0]
     test_array = cgraph_UUT.edges[node_UUT.inputs[0]]
     
@@ -63,7 +63,7 @@ def test_conv_splitter_feat8():
         raise LookupError
 
     chx = splitter.split_conv_into_chunks(node_UUT,256,256)
-    chx_UUT = cgraph.cgraph(chx)
+    chx_UUT = cgraph.Cgraph(chx)
     test_key = node_UUT.inputs[0]
     test_array = cgraph_UUT.edges[node_UUT.inputs[0]]
     
@@ -80,7 +80,7 @@ def test_gemm_splitter():
     cgraph_predictions = np.array(out[0],dtype=float)
     chx = splitter.split_gemm_into_chunks(node_UUT,256,256)
 
-    chx_UUT = cgraph.cgraph(chx)
+    chx_UUT = cgraph.Cgraph(chx)
 
     test_key = node_UUT.inputs[0]
     test_array = cgraph_UUT.edges[node_UUT.inputs[0]]
@@ -132,7 +132,7 @@ def test_acc_creation():
     core_size = (256,256)
 
     split_cgraph = cgraph.split_convolutions(cgraph_UUT,H=core_size[0],W=core_size[1])
-    mbv2_system = core.aimc_acc(split_cgraph,core_size)
+    mbv2_system = core.Aimc_acc(split_cgraph,core_size)
 
     import packer_utils
     packer_utils.plot_packing_tiled(mbv2_system.packer,'mbv2_bssf')

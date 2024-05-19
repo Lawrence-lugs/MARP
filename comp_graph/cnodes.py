@@ -55,15 +55,32 @@ def get_attribute_by_name(name:str,attr_list:list):
             return attr
     raise AttributeError
 
-class node(object):
-    def __init__(self, inputs:list[str], outputs:list[str]):
+class Node(object):
+    '''
+    Generic node.
+    Unimplemented types go here.
+
+    My nodes tend to just be convenient surrogates for the heavy onnx nodes.
+    '''
+    def __init__(self, inputs:list[str], outputs:list[str], function = 'defined'):
         self.inputs = inputs 
         self.outputs = outputs
+        self.function = function
 
     def forward(self):
         raise NotImplementedError
+    
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+        function = onnx_node.op_type
 
-class conv_node(node):
+        return Node(inputs,outputs,function)
+
+
+class conv_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, in_channel = None, strides = 1):
         '''
         Creates a conv node from a kernel of shape O,I,H,W
@@ -147,7 +164,7 @@ class conv_node(node):
 
         return out
     
-class clip_node(node):
+class clip_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], range:tuple[float,float]):
         '''
         Creates a clipping node that clips between the specified range
@@ -176,7 +193,7 @@ class clip_node(node):
         input = np.array(input).squeeze()
         return np.clip(input,self.range[0],self.range[1])
     
-class add_node(node):
+class add_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str]):
         '''
         Creates an add node that adds the inputs
@@ -197,7 +214,7 @@ class add_node(node):
         inputs = np.array(inputs).squeeze()
         return np.sum(inputs,axis=0)
 
-class cat_node(node):
+class cat_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str],axis:int = None):
         '''
         Creates an add node that concatenates the inputs
@@ -216,7 +233,7 @@ class cat_node(node):
             return inputs
         return np.concatenate(inputs,axis=self.axis)
     
-class global_avg_node(node):
+class global_avg_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str]):
         '''
         Creates an averaging node that averages every channel,
@@ -238,7 +255,7 @@ class global_avg_node(node):
         inputs = np.array(inputs).squeeze()
         return np.average(inputs,axis=(1,2))
     
-class flatten_node(node):
+class flatten_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str]):
         '''
         Creates an flattening node that flattens the inputs
@@ -259,7 +276,7 @@ class flatten_node(node):
         inputs = np.array(inputs).squeeze()
         return inputs.flatten()
 
-class gemm_node(node):
+class gemm_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], matrix:np.array, biases:np.array = 0):
         '''
         Creates a general matrix multiply node from a matrix of shape H,W
@@ -292,7 +309,7 @@ class gemm_node(node):
 
         return out
     
-class toeplitzizer_node(node):
+class toeplitzizer_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], ksize:int, strides:int = 1):
         '''
         Creates a node that transforms the input into a flattened toeplitz
@@ -312,7 +329,7 @@ class toeplitzizer_node(node):
         out = toeplitzize_input(input,ksize=self.ksize,strides=self.strides)
         return out
     
-class slicer_node(node):
+class slicer_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], row_lim:list[int] = [None,None],col_lim:list[int] = [None,None]):
         '''
         Creates a node that slices the input array according to the slicing
@@ -329,7 +346,7 @@ class slicer_node(node):
             return input[lim[0]:lim[1]]
         return input[self.row_lim[0]:self.row_lim[1],self.col_lim[0]:self.col_lim[1]]
     
-class reshaper_node(node):
+class reshaper_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], channels:int):
         '''
         Creates a node that reshapes the input array into C x H x W where H = W

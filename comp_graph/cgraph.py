@@ -6,7 +6,7 @@ from tqdm import tqdm
 from . import splitter
 import rectpack
 
-class cgraph(object):
+class Cgraph(object):
     '''
     A computational graph
 
@@ -20,7 +20,7 @@ class cgraph(object):
         of nodes on the cgraph.
     '''
 
-    def __init__(self,node_list:list[cnodes.node]):
+    def __init__(self,node_list:list[cnodes.Node]): 
         '''
         Parameters
         ---------
@@ -51,18 +51,30 @@ class cgraph(object):
                     convs,catter = cnodes.conv_node.from_onnx_depthwise(nx_model,node)
                     node_list.extend(convs)
                     node_list.append(catter)    
-            if node.op_type == 'Gemm':
+            elif node.op_type == 'Gemm':
                 node_list.append(cnodes.gemm_node.from_onnx_node(nx_model,node))
-            if node.op_type == 'Add':
+            elif node.op_type == 'Add':
                 node_list.append(cnodes.add_node.from_onnx_node(nx_model,node))
-            if node.op_type == 'Clip':
+            elif node.op_type == 'Clip':
                 node_list.append(cnodes.clip_node.from_onnx_node(nx_model,node))
-            if node.op_type == 'Flatten':
+            elif node.op_type == 'Flatten':
                 node_list.append(cnodes.flatten_node.from_onnx_node(nx_model,node))
-            if node.op_type == 'GlobalAveragePool':
+            elif node.op_type == 'GlobalAveragePool':
                 node_list.append(cnodes.global_avg_node.from_onnx_node(nx_model,node))
+            else:
+                node_list.append(cnodes.Node.from_onnx_node(nx_model,node))
 
-        return cgraph(node_list)
+        return Cgraph(node_list)
+
+    def check_if_node_ready(self,node):
+        '''
+        Checks if the preceding edges of a node is already filled
+        '''
+        for input in node.inputs:
+            if self.edges[input] is None:
+                return False
+        return True
+
 
     def forward(self,input_dict:dict,output_keys:list[str] = None,verbose=False):
         '''
@@ -76,17 +88,12 @@ class cgraph(object):
             list containing the keys of the edges whose values will
             be returned after inference.
         '''
-        def check_if_node_ready(node):
-            for input in node.inputs:
-                if self.edges[input] is None:
-                    return False
-            return True
         
         for key in input_dict:
             self.edges[key] = input_dict[key]
 
         for node in tqdm(self.nodes,disable=not verbose):
-            check_if_node_ready(node)
+            self.check_if_node_ready(node)
             if verbose: print(f'node:{node},\n output: {node.outputs}')
             in_array = []
             for input in node.inputs:
@@ -116,8 +123,12 @@ class cgraph(object):
                 shapes.append( (*node.matrix.shape,id) )
         return shapes
 
-def split_convolutions(in_cgraph:cgraph,H:int,W:int):
-
+def split_convolutions(in_cgraph:Cgraph,H:int,W:int):
+    '''
+    Limits the cgraph's matrices to a size limit of H, W.
+    If the matrix's size is larger, the matrix is split and 
+    additional nodes to manage this computation is added.
+    '''
     new_nodes = []
 
     for node in in_cgraph.nodes:
@@ -130,4 +141,4 @@ def split_convolutions(in_cgraph:cgraph,H:int,W:int):
         else:
             new_nodes.append(node)
 
-    return cgraph(new_nodes)
+    return Cgraph(new_nodes)

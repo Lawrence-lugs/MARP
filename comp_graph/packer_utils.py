@@ -4,6 +4,7 @@ import rectpack
 import matplotlib.pyplot as plt
 from matplotlib import patches
 import os
+from tqdm import tqdm
 
 def plot_packing_img(packer,
                  dir : str
@@ -15,7 +16,7 @@ def plot_packing_img(packer,
     if not os.path.exists(f'figures/{dir}'):
         os.mkdir(f'figures/{dir}')
 
-    for index, abin in enumerate(packer):
+    for index, abin in tqdm(enumerate(packer),desc='Plotting Bins'):
         bw, bh  = abin.width, abin.height
         # print('bin', bw, bh, "nr of rectangles in bin", len(abin))
         fig = plt.figure()
@@ -49,7 +50,7 @@ def plot_packing_tiled(packer,
     '''
     result = None
 
-    for index, abin in enumerate(packer):
+    for index, abin in tqdm(enumerate(packer),desc='Plotting Bins'):
         bw, bh  = abin.width, abin.height
         # print('bin', bw, bh, "nr of rectangles in bin", len(abin))
         fig = plt.figure()
@@ -89,6 +90,8 @@ def plot_packing_tiled(packer,
         tile_y = index // tile_count_h
 
         result.paste(bin_img, (tile_x * figwh[0], tile_y * figwh[1]))
+
+        plt.close(fig)
 
     result.save(f'{filename}.png')
 
