@@ -121,6 +121,7 @@ class Cgraph(object):
         for id,node in enumerate(self.nodes):
             if hasattr(node,"matrix"):
                 shapes.append( (*node.matrix.shape,id) )
+            node.rid = id
         return shapes
 
 def split_convolutions(in_cgraph:Cgraph,H:int,W:int):
