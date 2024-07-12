@@ -1,3 +1,3 @@
 # Analog IMC High Utilization Tasks
 
-Homemade Framework for simulating AIMC task handling and pipelining for analysis of core utilization and shape tradeoffs vs communication fabric
+Comfortably manipulatable numpy-based computational graphs derived from ONNX inputs for simulating hardware task scheduling in computational fabrics.
