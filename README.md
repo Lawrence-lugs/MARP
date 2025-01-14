@@ -8,12 +8,6 @@ Turns ONNX (or any, just haven't implemented it yet) to nodes that contain numpy
 
 ## Bin Packing
 
-Sample packing of MobileNetv2 with BAF
-![alt text](images/mbv2_baf.png)
-
-Sample packing of MobileNetv2 with BAF
-![alt text](images/mbv2_bssf.png)
-
 ## Requirements
 
 At least numpy
