@@ -1,7 +1,0 @@
-{
-    "python.testing.pytestArgs": [
-        "comp_graph"
-    ],
-    "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
-}
