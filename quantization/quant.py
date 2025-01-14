@@ -7,9 +7,14 @@ from scipy.signal import convolve2d
 
 class quantized_tensor:
     '''
-    Quantized Tensor
-    Reals are normalized to [-1,1]
-    If mode is 'symmetric', zero point is 0 and scale is 2 / (2**precision - 1)
+    Parameters:
+    shape : tuple -- Shape of the tensor
+    precision : int -- Number of bits to quantize to
+    mode : str -- Quantization mode, 'symmetric', 'maxmin' or '3sigma'
+    real_values : np.ndarray -- Real values of the tensor
+    quantized_values : np.ndarray -- Quantized values of the tensor
+    scale : float -- Scale of the quantization
+    zero_point : float -- Zero point of the quantization
     
     Main attributes:
     real_values : np.ndarray -- Real values of the tensor
@@ -18,20 +23,33 @@ class quantized_tensor:
     zero_point : float -- Zero point of the quantization
     shape : tuple -- Shape of the tensor
     fake_quantized_values : np.ndarray -- Quantized values translated back to real range
+    
+    Quantized Tensor
+    Reals are normalized to [-1,1]
+    If mode is 'symmetric', zero point is 0 and scale is 2 / (2**precision - 1)
+    
     '''
 
-    def __init__(self,shape,precision,mode='symmetric',real_values=None,quantized_values=None,scale=None,zero_point=None):
+    def __init__(self,shape=None,precision=None,mode='symmetric',real_values=None,quantized_values=None,scale=None,zero_point=None):
+        '''
+        '''
         if real_values is not None:
+            if precision is None:
+                raise ValueError('Precision must be provided')
             self.real_values = real_values
             self.quantize(precision,mode)
             self.dequantize()
         elif quantized_values is not None:
+            if scale is None or zero_point is None:
+                raise ValueError('Scale and zero point must be provided')
             self.real_values = None
             self.quantized_values = quantized_values
             self.scale = scale
             self.zero_point = zero_point
             self.dequantize()
         else:
+            if shape is None or precision is None:
+                raise ValueError('Shape and precision must be provided')
             self.real_values = np.random.uniform(-1,1,shape)
             self.quantize(precision,mode)
             self.dequantize()
@@ -71,14 +89,48 @@ def convolve_reals(a,w) -> np.ndarray:
     " o = aw "
     return convolve2d(a.real_values,w.real_values[::-1].T[::-1].T,mode='valid')
 
-def scaling_quantized_convolution(a,w,outBits,internalPrecision) -> quantized_tensor:
-    " o = aw but quantized "
+def scaling_quantized_matmul(w,a,outBits,internalPrecision,out_scale = None) -> quantized_tensor:
+    " o = w @ a.T but quantized "
+
+    # Matrix multiplication
+    qaqw = w.quantized_values @ a.quantized_values.T
+
+    # Scaling
+    if out_scale is None:
+        out_scale = 2 / (2**outBits - 1)
+    newscale = a.scale * w.scale / out_scale
+    m0, shift = convert_scale_to_shift_and_m0(
+                    newscale,
+                    precision=internalPrecision
+                )
+
+    fp_m = m0 * 2**(shift)
+    # m0bin = convert_to_fixed_point(m0, internalPrecision)
+    # m0int = int(m0bin,base=2)
+
+    scaled_clipped_shifted = (qaqw * fp_m).astype(int)
+    o_q = np.vectorize(saturating_clip)(scaled_clipped_shifted, outBits)
+
+    # Quantized tensor of the output
+    o_qtensor = quantized_tensor(
+                    qaqw.shape,
+                    outBits,
+                    quantized_values=o_q,
+                    scale=out_scale,
+                    zero_point=0 # Assume 0 for now, might be bad later.
+                )
+
+    return o_qtensor
+
+def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = None) -> quantized_tensor:
+    " o = a * w but quantized, this thing don't work atm"
 
     # Convolution
     qaqw = convolve2d(a.quantized_values,w.quantized_values[::-1].T[::-1].T,mode='valid')
 
     # Scaling
-    out_scale = 2 / (2**outBits - 1)
+    if out_scale is None:
+        out_scale = 2 / (2**outBits - 1)
     newscale = a.scale * w.scale / out_scale
     m0, shift = convert_scale_to_shift_and_m0(
                     newscale,
