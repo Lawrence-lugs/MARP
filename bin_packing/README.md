@@ -1,0 +1,1 @@
+Resources for applying rectangular bin packing on DNN tensors (in numpy form)

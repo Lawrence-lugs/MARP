@@ -13,3 +13,8 @@ Sample packing of MobileNetv2 with BAF
 
 Sample packing of MobileNetv2 with BAF
 ![alt text](images/mbv2_bssf.png)
+
+## Requirements
+
+At least numpy
+Download as you need (this contains a bunch of things that you may not even use, so no requirements.txt)
