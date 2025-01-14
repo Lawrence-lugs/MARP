@@ -3,8 +3,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import objects
-import model_flattener
+import bin_packing.model_flattener as model_flattener
 
 def remove_depthwise(matrices):
     return [i for i in matrices if len(i.shape) == 2]
@@ -114,8 +113,6 @@ if __name__ == '__main__':
 
     import torch
     from torchvision import models
-    
-    import model_flattener
 
     mbv2 = models.mobilenet_v2(pretrained=True)
 
