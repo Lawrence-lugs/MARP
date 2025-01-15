@@ -37,7 +37,7 @@ class quantized_tensor:
             if precision is None:
                 raise ValueError('Precision must be provided')
             self.real_values = real_values
-            self.quantize(precision,mode)
+            self.quantize(precision,mode,zero_point=zero_point)
             self.dequantize()
         elif quantized_values is not None:
             if scale is None or zero_point is None:
@@ -56,12 +56,15 @@ class quantized_tensor:
         self.shape = self.real_values.shape
         return
 
-    def quantize(self, precision, mode='symmetric'):
+    def quantize(self, precision, mode='symmetric', zero_point = None):
         if mode == 'maxmin' : 
             clip_high = self.real_values.max()
             clip_low = self.real_values.min()
-            self.scale = (clip_high - clip_low) / (2**precision - 1)
-            self.zero_point = clip_low
+            self.scale = 2*max(clip_high,clip_low) / (2**precision - 1)
+            if zero_point is None:
+                self.zero_point = self.real_values.mean()
+            else:
+                self.zero_point = zero_point
         elif mode == '3sigma' :
             mean = self.real_values.mean()
             std = self.real_values.std()
@@ -109,7 +112,7 @@ def scaling_quantized_matmul(w,a,outBits,internalPrecision,out_scale = None) -> 
     # m0int = int(m0bin,base=2)
 
     scaled_clipped_shifted = (qaqw * fp_m).astype(int)
-    o_q = np.vectorize(saturating_clip)(scaled_clipped_shifted, outBits)
+    o_q = saturating_clip(scaled_clipped_shifted, outBits)
 
     # Quantized tensor of the output
     o_qtensor = quantized_tensor(
@@ -123,7 +126,7 @@ def scaling_quantized_matmul(w,a,outBits,internalPrecision,out_scale = None) -> 
     return o_qtensor
 
 def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = None) -> quantized_tensor:
-    " o = a * w but quantized, this thing don't work atm"
+    " o = a * w but quantized "
 
     # Convolution
     qaqw = convolve2d(a.quantized_values,w.quantized_values[::-1].T[::-1].T,mode='valid')
@@ -140,7 +143,8 @@ def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = Non
     fp_m = m0 * 2**(shift)
 
     # Reals accounting for quantized and fixed point error
-    o_q = qaqw * fp_m
+    o_q = (qaqw * fp_m).astype(int)
+    o_q = saturating_clip(o_q, outBits)
 
     # Quantized tensor of the output
     o_qtensor = quantized_tensor(
@@ -178,16 +182,39 @@ def fixed_point_to_float(number,precision):
         out += int(number[i]) * 2**-(i+1)
     return out
 
-def saturating_clip (
-    num_i, outBits = 8
-):
+def right_shift(number,shift):
+    " Right shift a number. Shifting rounds toward -infty"
+    return int(np.floor(number / 2.**(shift)))
+
+def get_array_bits(array,signed=True):
+    " Get the number of bits required to represent an array "
+    return int(np.ceil(np.log2(np.abs(array).max())))+signed
+
+def saturating_clip_old (num_i, inBits = 16, outBits = 8):
+    '''
+    Saturating clip.
+
+    This only implemented saturation before. Now it also clips.
+    '''
+
+    # floor to round towards negative infinity
+    num_i_shifted = right_shift(num_i, inBits - outBits)
 
     min = -(2**(outBits-1))
     max = 2**(outBits-1)-1
     
-    if(num_i < min):
+    if(num_i_shifted < min):
         return min
-    if(num_i > max):
+    if(num_i_shifted > max):
         return max
     
-    return num_i
+    return num_i_shifted
+
+saturating_clip = np.vectorize(saturating_clip_old)
+
+def binary_array_to_int(array):
+    " Convert a binary array to an integer "
+    out = 0
+    for bit in array:
+        out = (out << 1) | bit
+    return out
