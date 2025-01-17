@@ -212,9 +212,17 @@ def saturating_clip_old (num_i, inBits = 16, outBits = 8):
 
 saturating_clip = np.vectorize(saturating_clip_old)
 
-def binary_array_to_int(array):
-    " Convert a binary array to an integer "
+def binary_array_to_int(array,signed=False,outBits=None):
+    ''' 
+    Convert a binary array to an integer 
+    The binary array is assumed to be in the last dimension
+    '''
     out = 0
-    for bit in array:
+    arr = np.moveaxis(array,-1,0)
+    for bit in arr:
         out = (out << 1) | bit
     return out
+
+def int_to_bin(n, bits):
+    " Convert an integer to a binary array "
+    return np.moveaxis(np.array([n >> i & 1 for i in range(bits-1,-1,-1)]),0,-1)
