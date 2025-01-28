@@ -182,15 +182,17 @@ def fixed_point_to_float(number,precision):
         out += int(number[i]) * 2**-(i+1)
     return out
 
-def right_shift(number,shift):
+def _right_shift(number,shift):
     " Right shift a number. Shifting rounds toward -infty"
     return int(np.floor(number / 2.**(shift)))
+
+right_shift = np.vectorize(_right_shift)
 
 def get_array_bits(array,signed=True):
     " Get the number of bits required to represent an array "
     return int(np.ceil(np.log2(np.abs(array).max())))+signed
 
-def saturating_clip_old (num_i, inBits = 16, outBits = 8):
+def _saturating_clip (num_i, inBits = 16, outBits = 8):
     '''
     Saturating clip.
 
@@ -210,7 +212,7 @@ def saturating_clip_old (num_i, inBits = 16, outBits = 8):
     
     return num_i_shifted
 
-saturating_clip = np.vectorize(saturating_clip_old)
+saturating_clip = np.vectorize(_saturating_clip)
 
 def binary_array_to_int(array,signed=False,outBits=None):
     ''' 
@@ -233,19 +235,38 @@ def int_to_trit(n, trits):
     tritter = (((n < 0) * -2) + 1) # Bipolar array
     return (a * tritter)[1:]
 
-def simulate_trit_mul(w,x, trits, verbose=False):
+def simulate_trit_mul(w,x, trits, verbose=False, real=True):
     " trit-decomposed multiplication "
     x_trits = int_to_trit(x, trits)
     partials = x_trits @ w.T
 
-    print(x_trits)
-    print(partials)
+    if(verbose):
+        print('x trits:')
+        print(x_trits)
+        print('partials:')
+        print(partials)
 
-    return po2_accumulate(partials)
+    if real:
+        return po2_accumulate_real(partials, verbose=verbose)
+    else:
+        return po2_accumulate(partials, verbose=verbose)
 
-def po2_accumulate(array):
+def po2_accumulate(a,verbose=False):
     " Accumulate an array of powers of 2 "
-    ydim, xdim = array.shape
-    po2 = 2**np.arange(0, ydim, 1)[::-1]
-    po2 = po2.repeat(xdim).reshape(ydim,xdim)
-    return (array * po2).sum(axis=0)
+    acc = np.zeros(a.shape[1])
+    print('shifting accumulator:')
+    for shift,row in enumerate(a[::-1]):
+        acc = acc + row * 2**shift
+        if verbose: print(acc)
+    return acc
+
+def po2_accumulate_real(a,verbose=False):
+    " Accumulate an array of powers of 2 "
+    acc = np.zeros(a.shape[1])
+    print('shifting accumulator:')
+    b = a * 2**(a.shape[0]-1)
+    for shift,row in enumerate(b[::-1]):
+        acc = acc/2
+        acc = acc + row
+        if verbose: print(acc)
+    return acc
