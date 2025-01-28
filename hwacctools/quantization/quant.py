@@ -226,3 +226,26 @@ def binary_array_to_int(array,signed=False,outBits=None):
 def int_to_bin(n, bits):
     " Convert an integer to a binary array "
     return np.moveaxis(np.array([n >> i & 1 for i in range(bits-1,-1,-1)]),0,-1)
+
+def int_to_trit(n, trits):
+    " Convert an integer to a trit (ternary) array "
+    a = int_to_bin(abs(n), trits).T
+    tritter = (((n < 0) * -2) + 1) # Bipolar array
+    return (a * tritter)[1:]
+
+def simulate_trit_mul(w,x, trits, verbose=False):
+    " trit-decomposed multiplication "
+    x_trits = int_to_trit(x, trits)
+    partials = x_trits @ w.T
+
+    print(x_trits)
+    print(partials)
+
+    return po2_accumulate(partials)
+
+def po2_accumulate(array):
+    " Accumulate an array of powers of 2 "
+    ydim, xdim = array.shape
+    po2 = 2**np.arange(0, ydim, 1)[::-1]
+    po2 = po2.repeat(xdim).reshape(ydim,xdim)
+    return (array * po2).sum(axis=0)
