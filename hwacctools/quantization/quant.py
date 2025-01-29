@@ -4,6 +4,8 @@
 
 import numpy as np
 from scipy.signal import convolve2d
+import pandas as pd
+df = pd.DataFrame
 
 class quantized_tensor:
     '''
@@ -231,20 +233,21 @@ def int_to_bin(n, bits):
 
 def int_to_trit(n, trits):
     " Convert an integer to a trit (ternary) array "
-    a = int_to_bin(abs(n), trits).T
+    a = int_to_bin(abs(n), trits)
     tritter = (((n < 0) * -2) + 1) # Bipolar array
-    return (a * tritter)[1:]
+    tritter = tritter.repeat(trits, axis=n.ndim-1).reshape(a.shape)
+    return (a * tritter)
 
 def simulate_trit_mul(w,x, trits, verbose=False, real=True):
     " trit-decomposed multiplication "
     x_trits = int_to_trit(x, trits)
-    partials = x_trits @ w.T
+    partials = x_trits.T @ w.T
 
     if(verbose):
         print('x trits:')
-        print(x_trits)
+        print(df(x_trits))
         print('partials:')
-        print(partials)
+        print(df(partials))
 
     if real:
         return po2_accumulate_real(partials, verbose=verbose)
@@ -265,8 +268,10 @@ def po2_accumulate_real(a,verbose=False):
     acc = np.zeros(a.shape[1])
     print('shifting accumulator:')
     b = a * 2**(a.shape[0]-1)
+    accs = []
     for shift,row in enumerate(b[::-1]):
         acc = acc/2
         acc = acc + row
-        if verbose: print(acc)
+        accs.append(acc)
+    if verbose: print(df(accs))
     return acc
