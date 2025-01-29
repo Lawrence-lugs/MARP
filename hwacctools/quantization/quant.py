@@ -247,7 +247,7 @@ def simulate_trit_mul(w,x, trits, verbose=False, real=True):
         print('x trits:')
         print(df(x_trits))
         print('partials:')
-        print(df(partials))
+        print(df(partials.T[::-1].T))
 
     if real:
         return po2_accumulate_real(partials, verbose=verbose)
@@ -272,6 +272,6 @@ def po2_accumulate_real(a,verbose=False):
     for shift,row in enumerate(b[::-1]):
         acc = acc/2
         acc = acc + row
-        accs.append(acc)
+        accs.append(acc.T[::-1].T.astype(int))
     if verbose: print(df(accs))
     return acc
