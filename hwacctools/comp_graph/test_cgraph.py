@@ -134,7 +134,7 @@ def test_acc_creation():
     split_cgraph = cgraph.split_convolutions(cgraph_UUT,H=core_size[0],W=core_size[1])
     mbv2_system = core.Aimc_acc(split_cgraph,core_size)
 
-    import packer_utils
+    import hwacc_design_garage.hwacctools.bin_packing.packer_utils as packer_utils
     packer_utils.plot_packing_tiled(mbv2_system.packer,'mbv2_bssf')
 
     print(f'Number of cores: {len(mbv2_system.packer)}')
