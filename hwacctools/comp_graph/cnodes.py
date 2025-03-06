@@ -85,15 +85,17 @@ class shape_node(Node):
     
     def forward(self,input:np.array):
         input = np.array(input)
+        input = np.squeeze(input)
         return input.shape
     
 class gather_node(Node):
-    def __init__(self, inputs:list[str], outputs:list[str], axis:int):
+    def __init__(self, inputs:list[str], outputs:list[str], axis:int, indices:np.array):
         '''
-        Creates a node that gathers the input along the axis
+        Creates a node that takes a set of index slices of the input
         '''
         super(gather_node,self).__init__(inputs,outputs)
         self.axis = axis
+        self.indices = indices
 
     @classmethod
     def from_onnx_node(self,onnx_model,onnx_node):
@@ -104,12 +106,13 @@ class gather_node(Node):
         outputs = onnx_node.output
 
         axis = get_attribute_by_name('axis',onnx_node.attribute).i
+        indices = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
 
-        return gather_node(inputs,outputs,axis)
+        return gather_node(inputs,outputs,axis,indices)
     
     def forward(self,input:np.array):
-        input = np.array(input)
-        return np.take(input,self.axis,axis=self.axis)
+        a = input[0]
+        return a[self.indices]
     
 class unsqueeze_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], axis):
@@ -132,10 +135,9 @@ class unsqueeze_node(Node):
         return shape_node(inputs,outputs)
     
     def forward(self,input:np.array):
-        input = np.array(input)
-        input = np.squeeze(input)
-        return input.unsqueeze(self.axis)
-
+        a = input[0]
+        a = a.reshape(a.shape[:self.axis] + (1,) + a.shape[self.axis:])
+        return a
 
 class concat_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], axis:int):
@@ -213,7 +215,47 @@ class quantize_node(Node):
         input = np.array(input).squeeze()
         out = np.round((input/self.scale) + self.zp)
         return out
+
+def from_QLinearMatMul(onnx_model,onnx_node):
+    '''
+    Creates a set of nodes equivalent to an ONNX QLinearMatMul
     
+    QLinearConv input structure:
+    0. input
+    1. input_scale
+    2. input_zero_point
+    3. kernel
+    4. kernel_scale
+    5. kernel_zero_point
+    6. output_scale
+    7. output_zero_point
+    '''
+    if onnx_node.op_type != 'QLinearMatMul':
+        raise TypeError('Input node is not a QLinearMatmul node')
+
+    inputs = [onnx_node.input[0]]
+    scaler_input = onnx_node.input[0]+'_scaler_input'
+    outputs = onnx_node.output
+
+    # Quantization-related parameters
+    scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
+    scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4]))
+    scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6]))
+    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
+    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5]))
+    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7]))
+
+    # Matrix Parameters
+    matrix = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3]))
+    biases = np.zeros(matrix.shape[1])
+
+    output_nodes = [
+        gemm_node(inputs,scaler_input,matrix,biases),
+        output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y)
+    ]
+
+    return output_nodes
+
 def from_QLinearConv(onnx_model,onnx_node):
     '''
     Creates a set of nodes equivalent to an ONNX QLinearConv
@@ -233,7 +275,7 @@ def from_QLinearConv(onnx_model,onnx_node):
         raise TypeError('Input node is not a QLinearConv node')
 
     inputs = [onnx_node.input[0]]
-    scaler_input = onnx_node.input[0]+'_scaler_input'
+    scaler_input = [onnx_node.input[0]+'_scaler_input']
     outputs = onnx_node.output
 
     # Quantization-related parameters
@@ -249,13 +291,33 @@ def from_QLinearConv(onnx_model,onnx_node):
     biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8]))
 
     strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
+    group = get_attribute_by_name('group',onnx_node.attribute).i
 
-    output_nodes = [
-        conv_node(inputs,scaler_input,kernel,biases,strides=strides),
-        output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y)
-    ]
+    if group == 1:
+        # Regular convolution
+        output_nodes = [
+            conv_node(inputs,scaler_input,kernel,biases,strides=strides),
+            output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y)
+        ]
+    else:
+        # Depthwise convolution
+        nodes, concatenator = generate_depthwise_nodes(inputs,scaler_input,kernel,biases,strides)
+        output_nodes = nodes + [concatenator,output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y)]
 
     return output_nodes
+
+def generate_depthwise_nodes(inputs,outputs,kernels,biases,strides):
+
+    dwnode_outputs = [f'{outputs[0]}_dwch_{i}' for i,ker in enumerate(kernels)]
+
+    nodes = []
+    for i,kern in enumerate(kernels):
+        output_for_this_dwnode = [f'{outputs[0]}_dwch_{i}']
+        nodes.append(conv_node(inputs,output_for_this_dwnode,kernels[i],biases[i],in_channel=i,strides=strides))
+
+    concatenator = cat_node(dwnode_outputs,outputs) #Make a concatenator node
+
+    return nodes, concatenator
 
 class quantized_global_avg_pool_node(Node):
     '''
@@ -318,7 +380,9 @@ class quantized_linear_add_node(Node):
         self.scale_out = scale_out
         self.zp_out = zp_out
 
-    def forward(self,x,y):
+    def forward(self,inputs):
+        x = inputs[0]
+        y = inputs[1]
         res_real = (x - self.zp_x) * self.scale_x + (y - self.zp_y) * self.scale_y
         res_q = np.round(res_real / self.scale_out) + self.zp_out
         return res_q
@@ -367,7 +431,10 @@ class output_scale_node(Node):
     
     def forward(self,input:np.array):
         input = np.array(input).squeeze()
-        out = (input * self.fp_m).astype(int)
+        # black magic needed to force fp_m multiplication to broadcast along the first dimension of out (C)
+        fp_m = self.fp_m
+        fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input.shape)-1)))
+        out = (input * fp_m).astype(int)
         out = q.saturating_clip(out, self.out_precision)
         return out
 

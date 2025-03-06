@@ -80,6 +80,8 @@ class Cgraph(object):
                 node_list.append(cnodes.unsqueeze_node.from_onnx_node(nx_model,node))
             elif node.op_type == 'Concat':
                 node_list.append(cnodes.concat_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'QLinearMatMul':
+                node_list.extend(cnodes.from_QLinearMatMul(nx_model,node))
             else:
                 raise NotImplementedError(f'Node type {node.op_type} not implemented')
 
@@ -122,6 +124,7 @@ class Cgraph(object):
             # This causes ragged nested arrays sometimes. 
 
             out_array = node.forward(in_array)
+
             for output in node.outputs:
                 self.edges[output] = out_array 
 
