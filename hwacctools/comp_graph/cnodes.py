@@ -2,6 +2,7 @@ import onnx
 from onnx import numpy_helper as nphelp
 import numpy as np
 from .compute import *
+from ..quantization import quant as q
 
 def get_initializer_by_name(onnx_model,name):
     for init in onnx_model.graph.initializer:
@@ -45,6 +46,330 @@ class Node(object):
 
         return Node(inputs,outputs,function)
 
+class reshape_node(Node):
+    '''
+    Reshapes input[0] into shape stated by input[1]
+    '''
+    def __init__(self, inputs: list[str], outputs: list[str]):
+        super().__init__(inputs, outputs)
+
+    def forward(self,inputs):
+        return inputs[0].reshape(inputs[1])
+    
+    @classmethod
+    def from_onnx_node(self, onnx_model, onnx_node):
+        if onnx_node.op_type != 'Reshape':
+            raise TypeError('Input node is not a Reshape node')
+        
+        inputs = onnx_node.input
+        outputs = onnx_node.output
+
+        return reshape_node(inputs,outputs)
+
+class shape_node(Node):
+    def __init__(self, inputs:list[str], outputs:list[str]):
+        '''
+        Creates a node that outputs the shape of the input
+        '''
+        super(shape_node,self).__init__(inputs,outputs)
+
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'Shape':
+            raise TypeError('Input node is not a shape node')
+
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+
+        return shape_node(inputs,outputs)
+    
+    def forward(self,input:np.array):
+        input = np.array(input)
+        return input.shape
+    
+class gather_node(Node):
+    def __init__(self, inputs:list[str], outputs:list[str], axis:int):
+        '''
+        Creates a node that gathers the input along the axis
+        '''
+        super(gather_node,self).__init__(inputs,outputs)
+        self.axis = axis
+
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'Gather':
+            raise TypeError('Input node is not a gather node')
+
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+
+        axis = get_attribute_by_name('axis',onnx_node.attribute).i
+
+        return gather_node(inputs,outputs,axis)
+    
+    def forward(self,input:np.array):
+        input = np.array(input)
+        return np.take(input,self.axis,axis=self.axis)
+    
+class unsqueeze_node(Node):
+    def __init__(self, inputs:list[str], outputs:list[str], axis):
+        '''
+        Creates a node that unsqueezes in a specific attribute axis
+        '''
+        super(shape_node,self).__init__(inputs,outputs)
+        self.axis = axis
+
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'Unsqueeze':
+            raise TypeError('Input node is not an Unsqueeze node')
+
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+
+        self.axis = get_attribute_by_name('axes',onnx_node.attribute).i
+
+        return shape_node(inputs,outputs)
+    
+    def forward(self,input:np.array):
+        input = np.array(input)
+        input = np.squeeze(input)
+        return input.unsqueeze(self.axis)
+
+
+class concat_node(Node):
+    def __init__(self, inputs:list[str], outputs:list[str], axis:int):
+        '''
+        Creates a node that concatenates the inputs along the axis
+        '''
+        super(concat_node,self).__init__(inputs,outputs)
+        self.axis = axis
+
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'Concat':
+            raise TypeError('Input node is not a concat node')
+
+        inputs = onnx_node.input
+        outputs = onnx_node.output
+
+        axis = get_attribute_by_name('axis',onnx_node.attribute).i
+
+        return concat_node(inputs,outputs,axis)
+    
+    def forward(self,inputs:np.array):
+        return np.concatenate(*inputs,axis=self.axis)
+
+class dequantize_node(Node):
+    '''
+    Dequantizes the input
+    '''
+
+    def __init__(self, inputs:list[str], outputs:list[str], scale:float, zp:float):
+        super(dequantize_node,self).__init__(inputs,outputs)
+        self.scale = scale
+        self.zp = zp
+
+    def forward(self,input:np.array):
+        return self.scale(input - self.zp)
+    
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'DequantizeLinear':
+            raise TypeError('Input node is not a dequantize node')
+
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+
+        scale = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
+        zp = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
+
+        return dequantize_node(inputs,outputs,scale,zp)
+
+class quantize_node(Node):
+    def __init__(self, inputs:list[str], outputs:list[str], scale:float, zp:float):
+        '''
+        Creates a quantize node that quantizes the inputs
+        '''
+        super(quantize_node,self).__init__(inputs,outputs)
+        self.scale = scale
+        self.zp = zp
+
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'QuantizeLinear':
+            raise TypeError('Input node is not a quantize node')
+
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+
+        scale = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
+        zp = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
+        # bitwidth = get_initializer_by_name('bit_width',onnx_node.attribute)
+
+        return quantize_node(inputs,outputs,scale,zp)
+    
+    def forward(self,input:np.array):
+        input = np.array(input).squeeze()
+        out = np.round((input/self.scale) + self.zp)
+        return out
+    
+def from_QLinearConv(onnx_model,onnx_node):
+    '''
+    Creates a set of nodes equivalent to an ONNX QLinearConv
+    
+    QLinearConv input structure:
+    0. input
+    1. input_scale
+    2. input_zero_point
+    3. kernel
+    4. kernel_scale
+    5. kernel_zero_point
+    6. output_scale
+    7. output_zero_point
+    8. bias
+    '''
+    if onnx_node.op_type != 'QLinearConv':
+        raise TypeError('Input node is not a QLinearConv node')
+
+    inputs = [onnx_node.input[0]]
+    scaler_input = onnx_node.input[0]+'_scaler_input'
+    outputs = onnx_node.output
+
+    # Quantization-related parameters
+    scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
+    scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4]))
+    scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6]))
+    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
+    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5]))
+    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7]))
+
+    # Matrix Parameters
+    kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3]))
+    biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8]))
+
+    strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
+
+    output_nodes = [
+        conv_node(inputs,scaler_input,kernel,biases,strides=strides),
+        output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y)
+    ]
+
+    return output_nodes
+
+class quantized_global_avg_pool_node(Node):
+    '''
+    Quantized Avg Pool
+
+    Not hardwarelike
+    '''
+
+    def __init__(self, inputs:list[str], outputs:list[str], in_scale:float, in_zp:float, out_scale:float, out_zp:float):
+        super(quantized_global_avg_pool_node,self).__init__(inputs,outputs)
+        self.in_scale = in_scale
+        self.in_zp = in_zp
+        self.out_scale = out_scale
+        self.out_zp = out_zp
+
+    def forward(self,input:np.array):
+        input = np.array(input).squeeze()
+
+        input_shaped = input.reshape(input.shape[0],-1)
+        
+        q_xi_sum = np.sum(input_shaped,axis=1)
+
+        n = input_shaped.shape[1]
+
+        m = self.in_scale/(self.out_scale)
+        b = - m*self.in_zp + self.out_zp
+        
+        q_y = (m/n) * q_xi_sum + b
+
+        return q_y
+    
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+
+        inputs = onnx_node.input
+        outputs = onnx_node.output
+
+        in_scale = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
+        in_zp = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
+        out_scale = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3]))
+        out_zp = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4]))
+
+        return quantized_global_avg_pool_node(inputs,outputs,in_scale,in_zp,out_scale,out_zp)
+
+class quantized_linear_add_node(Node):
+    '''
+    Implementation of quantized linear add. See
+    https://openaccess.thecvf.com/content_cvpr_2018/Supplemental/0777-supp.pdf
+
+    Not hardwarelike -- does not clip precision of the real fixed point multiplier values
+    '''
+
+    def __init__(self, inputs:list[str], outputs:list[str], scale_x:float, scale_y:float, zp_x:float, zp_y:float,
+                 scale_out:float, zp_out:float):
+        super(quantized_linear_add_node,self).__init__(inputs,outputs)
+        self.scale_x = scale_x
+        self.scale_y = scale_y
+        self.zp_x = zp_x
+        self.zp_y = zp_y
+        self.scale_out = scale_out
+        self.zp_out = zp_out
+
+    def forward(self,x,y):
+        res_real = (x - self.zp_x) * self.scale_x + (y - self.zp_y) * self.scale_y
+        res_q = np.round(res_real / self.scale_out) + self.zp_out
+        return res_q
+    
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+
+        inputs = [onnx_node.input[0],onnx_node.input[3]]
+        outputs = onnx_node.output
+
+        scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
+        zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
+        scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4]))
+        zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5]))
+        scale_out = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6]))
+        zp_out = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7]))
+
+        return quantized_linear_add_node(inputs,outputs,scale_x,scale_y,zp_x,zp_y,scale_out,zp_out)
+
+class output_scale_node(Node):
+    def __init__(self, inputs, outputs, scale_x, scale_w, scale_y, scale_precision = 16, out_precision=8):
+        '''
+        Output scaling per TFLite quantization
+
+        Hardwarelike -- Clips precision of the real_scale to scale_precision
+        '''
+        super(output_scale_node,self).__init__(inputs,outputs)
+        
+        newscale = scale_x * scale_w / scale_y
+
+        self.real_scale = newscale
+
+        m0, shift = q.vconvert_scale_to_shift_and_m0(
+                        newscale,
+                        precision=scale_precision
+        )
+
+        fp_m = m0 * np.power(2.,shift)
+
+        self.m0 = m0
+        self.shift = shift
+        self.fp_m = fp_m
+
+        self.out_precision = out_precision
+        self.scale_precision = scale_precision
+    
+    def forward(self,input:np.array):
+        input = np.array(input).squeeze()
+        out = (input * self.fp_m).astype(int)
+        out = q.saturating_clip(out, self.out_precision)
+        return out
 
 class conv_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, in_channel = None, strides = 1):
@@ -69,7 +394,7 @@ class conv_node(Node):
         outputs = onnx_node.output
 
         strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
-
+        
         kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
         biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
 

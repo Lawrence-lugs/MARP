@@ -9,9 +9,7 @@ import matplotlib.pyplot as plt
 import splitter, cnodes, cgraph
 
 print(f'Running ONNX version {onnx.__version__}')
-
 nx_model = onnx.load('onnx_models/mbv2.onnx')
-
 cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model)
 
 img = Image.open('onnx_models/dog4.png')

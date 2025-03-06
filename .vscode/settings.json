@@ -1,0 +1,44 @@
+{
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "terminal.explorerKind": "integrated",
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.automationProfile.linux": {
+        "path": "/usr/bin/bash",
+        "args": [
+            "-l"
+        ]
+    },
+    "terminal.integrated.profiles.linux": {
+        "bash": {
+            "path": "/usr/bin/bash",
+            "icon": "terminal-bash",
+            "args": [
+                "-l"
+            ]
+        },
+        "zsh": {
+            "path": "zsh"
+        },
+        "fish": {
+            "path": "fish"
+        },
+        "tmux": {
+            "path": "tmux",
+            "icon": "terminal-tmux"
+        },
+        "pwsh": {
+            "path": "pwsh",
+            "icon": "terminal-powershell"
+        }
+    },
+    "verilog.linting.linter": "verilator",
+    "verilog.linting.verilator.arguments": "../rtl/qracc_pkg.svh",
+    "verilog.linting.verilator.includePath": [
+        "rtl/activation_buffer",
+        "rtl/output_scaler"
+    ]
+}

@@ -160,15 +160,19 @@ def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = Non
     return o_qtensor
     
 def convert_scale_to_shift_and_m0(scale,precision=16):
-    " Convert scale to shift and zero point "
+    " Convert scale(s) to shift and zero point "
+
     shift = int(np.ceil(np.log2(scale)))
+    # shift = np.abs(shift)
     m0 = scale / 2**shift
     fp_string = convert_to_fixed_point(m0,precision)
     m0_clipped = fixed_point_to_float(fp_string,precision)
     return m0_clipped, shift
 
+vconvert_scale_to_shift_and_m0 = np.vectorize(convert_scale_to_shift_and_m0)
+
 def convert_to_fixed_point(number,precision):
-    " Convert a float [0,1] to fixed point binary "
+    " Convert a float [0,1] to fixed point binary string"
     out = ''
     for i in range(precision):
         number *= 2
@@ -176,6 +180,10 @@ def convert_to_fixed_point(number,precision):
         number -= integer
         out += str(integer)
     return out
+
+def convert_to_fixed_point_int(number,precision):
+    " Convert a float [0,1] to fixed point binary "
+    return int(convert_to_fixed_point(number,precision),base=2)
 
 def fixed_point_to_float(number,precision):
     " Convert a fixed point binary to float [0,1] "

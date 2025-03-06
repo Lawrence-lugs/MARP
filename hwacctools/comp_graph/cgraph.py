@@ -4,7 +4,6 @@ import numpy as np
 from . import cnodes
 from tqdm import tqdm
 from . import splitter
-import rectpack
 
 class Cgraph(object):
     '''
@@ -61,8 +60,28 @@ class Cgraph(object):
                 node_list.append(cnodes.flatten_node.from_onnx_node(nx_model,node))
             elif node.op_type == 'GlobalAveragePool':
                 node_list.append(cnodes.global_avg_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'QuantizeLinear':
+                node_list.append(cnodes.quantize_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'QLinearConv':
+                node_list.extend(cnodes.from_QLinearConv(nx_model,node))
+            elif node.op_type == 'QLinearAdd':
+                node_list.append(cnodes.quantized_linear_add_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'QLinearGlobalAveragePool':
+                node_list.append(cnodes.quantized_global_avg_pool_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'DequantizeLinear':
+                node_list.append(cnodes.dequantize_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'Shape':
+                node_list.append(cnodes.shape_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'Reshape':
+                node_list.append(cnodes.reshape_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'Gather':
+                node_list.append(cnodes.gather_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'Unsqueeze':
+                node_list.append(cnodes.unsqueeze_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'Concat':
+                node_list.append(cnodes.concat_node.from_onnx_node(nx_model,node))
             else:
-                node_list.append(cnodes.Node.from_onnx_node(nx_model,node))
+                raise NotImplementedError(f'Node type {node.op_type} not implemented')
 
         return Cgraph(node_list)
 
