@@ -3,6 +3,13 @@ from onnx import numpy_helper as nphelp
 import numpy as np
 from .compute import *
 from ..quantization import quant as q
+from joblib import Memory
+
+def is_initializer(onnx_model,name):
+    for init in onnx_model.graph.initializer:
+        if init.name == name:
+            return 'initializer'
+    return False
 
 def get_initializer_by_name(onnx_model,name):
     for init in onnx_model.graph.initializer:
@@ -83,10 +90,9 @@ class shape_node(Node):
 
         return shape_node(inputs,outputs)
     
-    def forward(self,input:np.array):
-        input = np.array(input)
-        input = np.squeeze(input)
-        return input.shape
+    def forward(self,inputs:np.array):
+        a = inputs[0]
+        return a.shape
     
 class gather_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], axis:int, indices:np.array):
@@ -119,7 +125,7 @@ class unsqueeze_node(Node):
         '''
         Creates a node that unsqueezes in a specific attribute axis
         '''
-        super(shape_node,self).__init__(inputs,outputs)
+        super(unsqueeze_node,self).__init__(inputs,outputs)
         self.axis = axis
 
     @classmethod
@@ -130,37 +136,41 @@ class unsqueeze_node(Node):
         inputs = [onnx_node.input[0]]
         outputs = onnx_node.output
 
-        self.axis = get_attribute_by_name('axes',onnx_node.attribute).i
+        axis = get_attribute_by_name('axes',onnx_node.attribute).i
 
-        return shape_node(inputs,outputs)
+        return unsqueeze_node(inputs,outputs,axis)
     
     def forward(self,input:np.array):
         a = input[0]
-        a = a.reshape(a.shape[:self.axis] + (1,) + a.shape[self.axis:])
+        a = np.expand_dims(a,axis=self.axis)
         return a
 
 class concat_node(Node):
-    def __init__(self, inputs:list[str], outputs:list[str], axis:int):
+    def __init__(self, inputs:list[str], outputs:list[str], axis:int, to_concat:np.array):
         '''
-        Creates a node that concatenates the inputs along the axis
+        Creates a node that concatenates the input with a predefined initializer
         '''
         super(concat_node,self).__init__(inputs,outputs)
         self.axis = axis
+        self.to_concat = to_concat
 
     @classmethod
     def from_onnx_node(self,onnx_model,onnx_node):
         if onnx_node.op_type != 'Concat':
             raise TypeError('Input node is not a concat node')
 
-        inputs = onnx_node.input
+        inputs = [onnx_node.input[0]]
         outputs = onnx_node.output
+
+        to_concat = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
 
         axis = get_attribute_by_name('axis',onnx_node.attribute).i
 
-        return concat_node(inputs,outputs,axis)
+        return concat_node(inputs,outputs,axis,to_concat)
     
     def forward(self,inputs:np.array):
-        return np.concatenate(*inputs,axis=self.axis)
+        a = inputs[0]
+        return np.concatenate([a,self.to_concat],axis=self.axis)
 
 class dequantize_node(Node):
     '''
@@ -173,7 +183,8 @@ class dequantize_node(Node):
         self.zp = zp
 
     def forward(self,input:np.array):
-        return self.scale(input - self.zp)
+        input = np.array(input).squeeze(axis=0)
+        return self.scale*(input - self.zp)
     
     @classmethod
     def from_onnx_node(self,onnx_model,onnx_node):
@@ -212,7 +223,7 @@ class quantize_node(Node):
         return quantize_node(inputs,outputs,scale,zp)
     
     def forward(self,input:np.array):
-        input = np.array(input).squeeze()
+        input = np.array(input).squeeze(axis=0)
         out = np.round((input/self.scale) + self.zp)
         return out
 
@@ -234,7 +245,7 @@ def from_QLinearMatMul(onnx_model,onnx_node):
         raise TypeError('Input node is not a QLinearMatmul node')
 
     inputs = [onnx_node.input[0]]
-    scaler_input = onnx_node.input[0]+'_scaler_input'
+    scaler_input = [onnx_node.input[0]+'_scaler_input']
     outputs = onnx_node.output
 
     # Quantization-related parameters
@@ -333,10 +344,10 @@ class quantized_global_avg_pool_node(Node):
         self.out_scale = out_scale
         self.out_zp = out_zp
 
-    def forward(self,input:np.array):
-        input = np.array(input).squeeze()
+    def forward(self,inputs:np.array):
+        a = inputs[0].squeeze(axis=0)
 
-        input_shaped = input.reshape(input.shape[0],-1)
+        input_shaped = a.reshape(a.shape[0],-1)
         
         q_xi_sum = np.sum(input_shaped,axis=1)
 
@@ -352,7 +363,7 @@ class quantized_global_avg_pool_node(Node):
     @classmethod
     def from_onnx_node(self,onnx_model,onnx_node):
 
-        inputs = onnx_node.input
+        inputs = [onnx_node.input[0]]
         outputs = onnx_node.output
 
         in_scale = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
@@ -371,7 +382,7 @@ class quantized_linear_add_node(Node):
     '''
 
     def __init__(self, inputs:list[str], outputs:list[str], scale_x:float, scale_y:float, zp_x:float, zp_y:float,
-                 scale_out:float, zp_out:float):
+                 scale_out:float, zp_out:float, other_initializer = None):
         super(quantized_linear_add_node,self).__init__(inputs,outputs)
         self.scale_x = scale_x
         self.scale_y = scale_y
@@ -379,10 +390,14 @@ class quantized_linear_add_node(Node):
         self.zp_y = zp_y
         self.scale_out = scale_out
         self.zp_out = zp_out
+        self.other_initializer = other_initializer
 
     def forward(self,inputs):
         x = inputs[0]
-        y = inputs[1]
+        if self.other_initializer is not None:
+            y = self.other_initializer
+        else:
+            y = inputs[1]
         res_real = (x - self.zp_x) * self.scale_x + (y - self.zp_y) * self.scale_y
         res_q = np.round(res_real / self.scale_out) + self.zp_out
         return res_q
@@ -390,7 +405,14 @@ class quantized_linear_add_node(Node):
     @classmethod
     def from_onnx_node(self,onnx_model,onnx_node):
 
-        inputs = [onnx_node.input[0],onnx_node.input[3]]
+        # Check if input[3] is an initializer!
+        if( is_initializer(onnx_model,onnx_node.input[3]) ):
+            inputs = [onnx_node.input[0]]
+            other_initializer = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3]))
+        else: # other input is input
+            inputs = [onnx_node.input[0],onnx_node.input[3]]
+            other_initializer = None
+        
         outputs = onnx_node.output
 
         scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
@@ -400,7 +422,7 @@ class quantized_linear_add_node(Node):
         scale_out = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6]))
         zp_out = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7]))
 
-        return quantized_linear_add_node(inputs,outputs,scale_x,scale_y,zp_x,zp_y,scale_out,zp_out)
+        return quantized_linear_add_node(inputs,outputs,scale_x,scale_y,zp_x,zp_y,scale_out,zp_out,other_initializer)
 
 class output_scale_node(Node):
     def __init__(self, inputs, outputs, scale_x, scale_w, scale_y, scale_precision = 16, out_precision=8):
@@ -430,12 +452,15 @@ class output_scale_node(Node):
         self.scale_precision = scale_precision
     
     def forward(self,input:np.array):
-        input = np.array(input).squeeze()
+        input_squeezed = np.array(input).squeeze()
         # black magic needed to force fp_m multiplication to broadcast along the first dimension of out (C)
         fp_m = self.fp_m
-        fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input.shape)-1)))
-        out = (input * fp_m).astype(int)
+        fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input_squeezed.shape)-1)))
+        out = (input_squeezed * fp_m).astype(int)
         out = q.saturating_clip(out, self.out_precision)
+
+        # add back the batch axis
+        out = out.reshape(1,*out.shape)
         return out
 
 class conv_node(Node):
@@ -497,9 +522,10 @@ class conv_node(Node):
         '''
         Performs the node operation
 
-        input: C,H,W tensor
+        input[0]: C,H,W tensor
         '''
-        input = np.array(input).squeeze()
+        # Squeeze to remove batch dimension
+        input = np.array(input[0]).squeeze(axis=0)
 
         if self.in_channel is not None:
             input = np.expand_dims(input[self.in_channel],0)
@@ -516,9 +542,11 @@ class conv_node(Node):
         H = input.shape[1] // self.strides
         W = input.shape[2] // self.strides
 
-        out = flat_out.T.reshape(C,H,W)
+        out = flat_out.T.reshape(1,C,H,W)
         if self.in_channel is not None:
-            out = out.squeeze()
+            out = out.squeeze(axis=0)
+
+        out = out.reshape(1,*out.shape)
 
         return out
     
@@ -548,7 +576,7 @@ class clip_node(Node):
         return clip_node(inputs,outputs,range)
     
     def forward(self,input:np.array):
-        input = np.array(input).squeeze()
+        input = np.array(input).squeeze(axis=0)
         return np.clip(input,self.range[0],self.range[1])
     
 class add_node(Node):
@@ -569,7 +597,7 @@ class add_node(Node):
         return add_node(inputs,outputs)
     
     def forward(self,inputs:list[np.ndarray]):
-        inputs = np.array(inputs).squeeze()
+        inputs = np.array(inputs).squeeze(axis=0)
         return np.sum(inputs,axis=0)
 
 class cat_node(Node):
@@ -587,7 +615,7 @@ class cat_node(Node):
         Returns the input if the concat axis is not in the range or self.axis is unspecified.
         '''
         if self.axis is None:
-            inputs = np.array(inputs).squeeze()
+            inputs = np.array(inputs)
             return inputs
         return np.concatenate(inputs,axis=self.axis)
     
@@ -610,7 +638,7 @@ class global_avg_node(Node):
         return global_avg_node(inputs,outputs)
     
     def forward(self,inputs:np.array):
-        inputs = np.array(inputs).squeeze()
+        inputs = np.array(inputs).squeeze(axis=0)
         return np.average(inputs,axis=(1,2))
     
 class flatten_node(Node):
@@ -631,7 +659,7 @@ class flatten_node(Node):
         return flatten_node(inputs,outputs)
     
     def forward(self,inputs:np.array):        
-        inputs = np.array(inputs).squeeze()
+        inputs = np.array(inputs).squeeze(axis=0)
         return inputs.flatten()
 
 class gemm_node(Node):
@@ -662,7 +690,7 @@ class gemm_node(Node):
 
         input: vector
         '''
-        input = np.array(input).squeeze()
+        input = np.array(input).squeeze(axis=0)
         out = (input @ self.matrix) + self.biases
 
         return out
@@ -683,7 +711,7 @@ class toeplitzizer_node(Node):
 
         input: vector
         '''
-        input = np.array(input).squeeze()
+        input = np.array(input).squeeze(axis=0)
         out = toeplitzize_input(input,ksize=self.ksize,strides=self.strides)
         return out
     
@@ -698,7 +726,7 @@ class slicer_node(Node):
         self.col_lim = col_lim
 
     def forward(self,input:np.array):
-        input = np.array(input).squeeze()
+        input = np.array(input).squeeze(axis=0)
         if len(input.shape) == 1:
             lim = self.col_lim if self.row_lim == [None,None] else self.row_lim
             return input[lim[0]:lim[1]]
@@ -713,7 +741,7 @@ class reshaper_node(Node):
         self.channels = channels
 
     def forward(self,input:np.array):
-        input = np.array(input).squeeze()
+        input = np.array(input).squeeze(axis=0)
         C = self.channels
         H = int(np.sqrt(input.shape[0]))
         W = H

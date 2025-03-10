@@ -4,6 +4,7 @@ import numpy as np
 from . import cnodes
 from tqdm import tqdm
 from . import splitter
+import os
 
 class Cgraph(object):
     '''
@@ -97,7 +98,7 @@ class Cgraph(object):
         return True
 
 
-    def forward(self,input_dict:dict,output_keys:list[str] = None,verbose=False):
+    def forward(self,input_dict:dict,output_keys:list[str] = None,verbose=False,cachePath = None, recalculate=False):
         '''
         Parameters
         ----------
@@ -109,24 +110,44 @@ class Cgraph(object):
             list containing the keys of the edges whose values will
             be returned after inference.
         '''
+
+        if cachePath is not None:
+            if not os.path.exists(cachePath):
+                os.makedirs(cachePath)
         
         for key in input_dict:
             self.edges[key] = input_dict[key]
 
         for node in tqdm(self.nodes,disable=not verbose):
             self.check_if_node_ready(node)
+
             if verbose: print(f'node:{node},\n output: {node.outputs}')
             in_array = []
-            for input in node.inputs:
-                in_array.append(self.edges[input])
-            
-            # Squeeze eliminates extra dimension if there's only one input
-            # This causes ragged nested arrays sometimes. 
 
-            out_array = node.forward(in_array)
+            for input in node.inputs:
+                if cachePath is not None:
+                    try:
+                        in_array.append(np.load(cachePath+f'/{input}.npy'))
+                    except FileNotFoundError:
+                        in_array.append(self.edges[input]) 
+                else:
+                    in_array.append(self.edges[input])
+
+            if cachePath is not None:
+                if recalculate:
+                    out_array = node.forward(in_array)
+                    np.save(cachePath + f'/{node.outputs[0]}.npy',out_array)
+                else:
+                    try:
+                        out_array = np.load(cachePath + f'/{node.outputs[0]}.npy')
+                    except FileNotFoundError:
+                        out_array = node.forward(in_array)
+                        np.save(cachePath + f'/{node.outputs[0]}.npy',out_array) 
+            else:
+                out_array = node.forward(in_array)
 
             for output in node.outputs:
-                self.edges[output] = out_array 
+                self.edges[output] = out_array
 
         if output_keys is None:
             # Return the output of the last node

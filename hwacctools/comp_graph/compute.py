@@ -12,16 +12,20 @@ def toeplitzize_input(in_tensor,ksize=3,strides=1):
     Flattens input tensor into a Toeplitz matrix for passing into a
     flattened kernel. Zero pads by default.
 
-    input: C,H,W tensor
+    input: B,C,H,W tensor
+
+    Assumes B=1 for now
     '''
 
-    #Convert to H,W,C tensor
+    #Convert to B,H,W,C tensor
     tensor = in_tensor.transpose(1,2,0)
 
     H = tensor.shape[0] // strides
     W = tensor.shape[1] // strides
-    C = tensor.shape[2]
+    C = tensor.shape[2] 
 
+    # For now, padsame all 3x3 kernels (for mbv2)
+    # Pointwise convolutions are not padded
     if ksize == 3:
         tensor2 = np.pad(tensor,((1,1),(1,1),(0,0)))
         out = np.empty((H*W,C*9))
