@@ -260,11 +260,19 @@ def from_QLinearMatMul(onnx_model,onnx_node):
     matrix = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3]))
     biases = np.zeros(matrix.shape[1])
 
-    scaler_offset = -matrix.sum(axis=0) * zp_x
+    # == M Scaling ==
+    # See "tflite quantized matmul" in quantization notes
+    scale = scale_x * scale_w / scale_y
+    
+    # == Zero point offset ==
+    # See "zeroes thereof" in quantization notes
+    # zp_w is always assumed to be 0, otherwise scaling actually gets expensive
+    assert zp_w.any() == False
+    scaler_offset = zp_y + scale*(-matrix.sum(axis=0) * zp_x)
 
     output_nodes = [
         gemm_node(inputs,scaler_input,matrix,biases),
-        output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y,offset=scaler_offset)
+        output_scale_node(scaler_input,outputs,scale=scale,offset=scaler_offset)
     ]
 
     return output_nodes
@@ -306,13 +314,21 @@ def from_QLinearConv(onnx_model,onnx_node):
     strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
     group = get_attribute_by_name('group',onnx_node.attribute).i
 
-    scaler_offset = -kernel.sum(axis=(1,2,3)) * zp_x
+    # == M Scaling ==
+    # See "tflite quantized matmul" in quantization notes
+    scale = scale_x * scale_w / scale_y
+    
+    # == Zero point offset ==
+    # See "zeroes thereof" in quantization notes
+    # zp_w is always assumed to be 0, otherwise scaling actually gets expensive
+    assert zp_w.any() == False
+    scaler_offset = zp_y + scale*(-kernel.sum(axis=(1,2,3)) * zp_x)
 
     if group == 1:
         # Regular convolution
         output_nodes = [
             conv_node(inputs,scaler_input,kernel,biases,strides=strides),
-            output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y,offset=scaler_offset)
+            output_scale_node(scaler_input,outputs,scale,offset=scaler_offset)
         ]
     else:
         # Depthwise convolution
@@ -429,7 +445,7 @@ class quantized_linear_add_node(Node):
         return quantized_linear_add_node(inputs,outputs,scale_x,scale_y,zp_x,zp_y,scale_out,zp_out,other_initializer)
 
 class output_scale_node(Node):
-    def __init__(self, inputs, outputs, scale_x, scale_w, scale_y, offset, scale_precision = 16, out_precision=8):
+    def __init__(self, inputs, outputs, scale, offset, scale_precision = 16, out_precision=8):
         '''
         Output scaling per TFLite quantization
 
@@ -439,12 +455,10 @@ class output_scale_node(Node):
         '''
         super(output_scale_node,self).__init__(inputs,outputs)
         
-        newscale = scale_x * scale_w / scale_y
-
-        self.real_scale = newscale
+        self.real_scale = scale
 
         m0, shift = q.vconvert_scale_to_shift_and_m0(
-                        newscale,
+                        scale,
                         precision=scale_precision
         )
 
@@ -462,17 +476,11 @@ class output_scale_node(Node):
         input_squeezed = np.array(input).squeeze()
         # black magic needed to force fp_m multiplication to broadcast along the first dimension of out (C)
 
-        input_squeezed = input_squeezed + self.offset
-
         fp_m = self.real_scale
         fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input_squeezed.shape)-1)))
         out = (input_squeezed * fp_m).astype(int)
+        out = out + self.offset
         out = q.saturating_clip(out, self.out_precision)
-
-        # errors here
-        # see Efficient handling of zero-points from TFlite paper
-
-        # add back the batch axis
         out = out.reshape(1,*out.shape)
         return out
 
