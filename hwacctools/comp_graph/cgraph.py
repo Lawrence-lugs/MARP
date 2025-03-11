@@ -98,7 +98,7 @@ class Cgraph(object):
         return True
 
 
-    def forward(self,input_dict:dict,output_keys:list[str] = None,verbose=False,cachePath = None, recalculate=False):
+    def forward(self,input_dict:dict,output_keys:list[str] = None,verbose=False,cachePath = None, recalculate=False, progbar=True):
         '''
         Parameters
         ----------
@@ -118,7 +118,7 @@ class Cgraph(object):
         for key in input_dict:
             self.edges[key] = input_dict[key]
 
-        for node in tqdm(self.nodes,disable=not verbose):
+        for node in tqdm(self.nodes,disable=not progbar):
             self.check_if_node_ready(node)
 
             if verbose: print(f'node:{node},\n output: {node.outputs}')

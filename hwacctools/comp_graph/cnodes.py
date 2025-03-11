@@ -260,9 +260,11 @@ def from_QLinearMatMul(onnx_model,onnx_node):
     matrix = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3]))
     biases = np.zeros(matrix.shape[1])
 
+    scaler_offset = -matrix.sum(axis=0) * zp_x
+
     output_nodes = [
         gemm_node(inputs,scaler_input,matrix,biases),
-        output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y)
+        output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y,offset=scaler_offset)
     ]
 
     return output_nodes
@@ -304,16 +306,18 @@ def from_QLinearConv(onnx_model,onnx_node):
     strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
     group = get_attribute_by_name('group',onnx_node.attribute).i
 
+    scaler_offset = -kernel.sum(axis=(1,2,3)) * zp_x
+
     if group == 1:
         # Regular convolution
         output_nodes = [
             conv_node(inputs,scaler_input,kernel,biases,strides=strides),
-            output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y)
+            output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y,offset=scaler_offset)
         ]
     else:
         # Depthwise convolution
         nodes, concatenator = generate_depthwise_nodes(inputs,scaler_input,kernel,biases,strides)
-        output_nodes = nodes + [concatenator,output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y)]
+        output_nodes = nodes + [concatenator,output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y,offset=scaler_offset)]
 
     return output_nodes
 
@@ -425,9 +429,11 @@ class quantized_linear_add_node(Node):
         return quantized_linear_add_node(inputs,outputs,scale_x,scale_y,zp_x,zp_y,scale_out,zp_out,other_initializer)
 
 class output_scale_node(Node):
-    def __init__(self, inputs, outputs, scale_x, scale_w, scale_y, scale_precision = 16, out_precision=8):
+    def __init__(self, inputs, outputs, scale_x, scale_w, scale_y, offset, scale_precision = 16, out_precision=8):
         '''
         Output scaling per TFLite quantization
+
+        all inputs have scale, but only x can have a zero
 
         Hardwarelike -- Clips precision of the real_scale to scale_precision
         '''
@@ -447,6 +453,7 @@ class output_scale_node(Node):
         self.m0 = m0
         self.shift = shift
         self.fp_m = fp_m
+        self.offset = offset
 
         self.out_precision = out_precision
         self.scale_precision = scale_precision
@@ -454,10 +461,16 @@ class output_scale_node(Node):
     def forward(self,input:np.array):
         input_squeezed = np.array(input).squeeze()
         # black magic needed to force fp_m multiplication to broadcast along the first dimension of out (C)
-        fp_m = self.fp_m
+
+        input_squeezed = input_squeezed + self.offset
+
+        fp_m = self.real_scale
         fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input_squeezed.shape)-1)))
         out = (input_squeezed * fp_m).astype(int)
         out = q.saturating_clip(out, self.out_precision)
+
+        # errors here
+        # see Efficient handling of zero-points from TFlite paper
 
         # add back the batch axis
         out = out.reshape(1,*out.shape)
@@ -545,8 +558,7 @@ class conv_node(Node):
         out = flat_out.T.reshape(1,C,H,W)
         if self.in_channel is not None:
             out = out.squeeze(axis=0)
-
-        out = out.reshape(1,*out.shape)
+        # out = out.reshape(1,*out.shape)
 
         return out
     
