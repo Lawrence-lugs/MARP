@@ -262,13 +262,14 @@ def from_QLinearMatMul(onnx_model,onnx_node):
 
     # == M Scaling ==
     # See "tflite quantized matmul" in quantization notes
-    scale = scale_x * scale_w / scale_y
+    scale = (scale_x * scale_w) / scale_y
     
     # == Zero point offset ==
     # See "zeroes thereof" in quantization notes
-    # zp_w is always assumed to be 0, otherwise scaling actually gets expensive
+    # zp_w is always assumed to be 0, otherwise scaling actually gets expensiv
     assert zp_w.any() == False
-    scaler_offset = zp_y + scale*(-matrix.sum(axis=0) * zp_x)
+    scaler_offset = zp_y - scale*(matrix.sum(axis=0) * zp_x)
+    # scaler_offset = np.array(0) 
 
     output_nodes = [
         gemm_node(inputs,scaler_input,matrix,biases),
@@ -333,7 +334,7 @@ def from_QLinearConv(onnx_model,onnx_node):
     else:
         # Depthwise convolution
         nodes, concatenator = generate_depthwise_nodes(inputs,scaler_input,kernel,biases,strides)
-        output_nodes = nodes + [concatenator,output_scale_node(scaler_input,outputs,scale_x,scale_w,scale_y,offset=scaler_offset)]
+        output_nodes = nodes + [concatenator,output_scale_node(scaler_input,outputs,scale=scale,offset=scaler_offset)]
 
     return output_nodes
 
@@ -471,7 +472,7 @@ class output_scale_node(Node):
 
         self.out_precision = out_precision
         self.scale_precision = scale_precision
-    
+
     def forward(self,input:np.array):
         input_squeezed = np.array(input).squeeze()
         # black magic needed to force fp_m multiplication to broadcast along the first dimension of out (C)
@@ -479,8 +480,12 @@ class output_scale_node(Node):
         fp_m = self.real_scale
         fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input_squeezed.shape)-1)))
         out = (input_squeezed * fp_m).astype(int)
-        out = out + self.offset
-        out = q.saturating_clip(out, self.out_precision)
+        if self.offset.ndim == 0:
+            offset_broadcast = self.offset
+        else:
+            offset_broadcast = self.offset[:,*[np.newaxis]*len(input_squeezed.shape[1:])]
+        out = out + offset_broadcast
+        out = q.saturating_clip(out, self.out_precision, signed=False)
         out = out.reshape(1,*out.shape)
         return out
 

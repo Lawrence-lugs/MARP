@@ -11,7 +11,8 @@ def add_tensor_to_model_outputs(model, tensor_name):
     model.graph.output.append(layer_value_info)
     return model
 
-def get_intermediate_tensor_value(model, tensor_name, img_array):
+def get_intermediate_tensor_value(modelpath, tensor_name, img_array):      
+    model = onnx.load(modelpath)
     model = add_tensor_to_model_outputs(model, tensor_name)
     # The desired tensor is the last one in the outputs list
     return infer(model, img_array)[-1]
