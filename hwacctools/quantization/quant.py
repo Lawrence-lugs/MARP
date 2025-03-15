@@ -202,7 +202,7 @@ def get_array_bits(array,signed=True):
     " Get the number of bits required to represent an array "
     return int(np.ceil(np.log2(np.abs(array).max())))+signed
 
-def _saturating_clip (num_i, inBits = 16, outBits = 8):
+def _saturating_clip (num_i, inBits = 16, outBits = 8, signed = True):
     '''
     Saturating clip.
 
@@ -212,8 +212,12 @@ def _saturating_clip (num_i, inBits = 16, outBits = 8):
     # floor to round towards negative infinity
     num_i_shifted = right_shift(num_i, inBits - outBits)
 
-    min = -(2**(outBits-1))
-    max = 2**(outBits-1)-1
+    if signed:
+        min = -(2**(outBits-1))
+        max = 2**(outBits-1)-1
+    else:
+        min = 0
+        max = 2**outBits-1
     
     if(num_i_shifted < min):
         return min
