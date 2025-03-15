@@ -479,7 +479,11 @@ class output_scale_node(Node):
 
         fp_m = self.real_scale
         fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input_squeezed.shape)-1)))
+<<<<<<< HEAD
         out = np.round(input_squeezed * fp_m)
+=======
+        out = (input_squeezed * fp_m).astype(int)
+>>>>>>> origin/main
         if self.offset.ndim == 0:
             offset_broadcast = self.offset
         else:
