@@ -181,7 +181,6 @@ def split_gemm_into_chunks(cnode:cnodes.gemm_node,H:int,W:int):
 
         cat_inputs.append(adder_output_edge)
 
-    cat_output_edge = f'{cnode.outputs[0]}_cat'
-    cat = cnodes.cat_node(cat_inputs,[cat_output_edge],axis=0)
+    cat = cnodes.cat_node(cat_inputs,cnode.outputs,axis=0)
     nodes.append(cat)
     return nodes

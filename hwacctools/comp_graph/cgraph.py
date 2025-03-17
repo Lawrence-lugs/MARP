@@ -37,6 +37,15 @@ class Cgraph(object):
             for output in node.outputs:
                 self.edges[output] = None
 
+    def check_if_node_done(self,node):
+        '''
+        Checks if the outputs of a node is already filled
+        '''
+        for output in node.outputs:
+            if self.edges[output] is None:
+                return False
+        return True
+
     @classmethod
     def from_onnx_model(cls,nx_model, tiles=None):
         '''
@@ -97,7 +106,6 @@ class Cgraph(object):
                 return False
         return True
 
-
     def forward(self,input_dict:dict,output_keys:list[str] = None,verbose=False,cachePath = None, recalculate=False, progbar=True):
         '''
         Parameters
@@ -118,42 +126,41 @@ class Cgraph(object):
         for key in input_dict:
             self.edges[key] = input_dict[key]
 
-        for node in tqdm(self.nodes,disable=not progbar):
-            self.check_if_node_ready(node)
+        while not self.check_if_node_done(self.nodes[-1]):
+            for node in tqdm(self.nodes,disable=not progbar):
+                if not self.check_if_node_ready(node):
+                    continue
 
-            if verbose: print(f'node:{node},\n output: {node.outputs}')
-            in_array = []
+                if self.check_if_node_done(node):
+                    continue
 
-            for input in node.inputs:
-                if cachePath is not None:
-                    try:
-                        in_array.append(np.load(cachePath+f'/{input}.npy'))
-                    except FileNotFoundError:
-                        in_array.append(self.edges[input]) 
-                else:
+                if verbose: print(f'node:{node},\n output: {node.outputs}')
+                in_array = []
+
+                for input in node.inputs:
                     in_array.append(self.edges[input])
 
-            if cachePath is not None:
-                if recalculate:
-                    out_array = node.forward(in_array)
-                    np.save(cachePath + f'/{node.outputs[0]}.npy',out_array)
-                else:
-                    try:
-                        out_array = np.load(cachePath + f'/{node.outputs[0]}.npy')
-                    except FileNotFoundError:
+                if cachePath is not None:
+                    if recalculate:
                         out_array = node.forward(in_array)
-                        np.save(cachePath + f'/{node.outputs[0]}.npy',out_array) 
-            else:
-                out_array = node.forward(in_array)
+                        np.save(cachePath + f'/{node.outputs[0]}.npy',out_array)
+                    else:
+                        try:
+                            out_array = np.load(cachePath + f'/{node.outputs[0]}.npy',allow_pickle=True)
+                        except FileNotFoundError:
+                            out_array = node.forward(in_array)
+                            np.save(cachePath + f'/{node.outputs[0]}.npy',out_array) 
+                else:
+                    out_array = node.forward(in_array)
 
-            for output in node.outputs:
-                self.edges[output] = out_array
+                for output in node.outputs:
+                    self.edges[output] = out_array
 
-        if output_keys is None:
-            # Return the output of the last node
-            output_keys = self.nodes[-1].outputs
+            if output_keys is None:
+                # Return the output of the last node
+                output_keys = self.nodes[-1].outputs
 
-        return [self.edges[x] for x in output_keys]
+            return [self.edges[x] for x in output_keys]
     
     def _get_shape_list_id(self):
         '''

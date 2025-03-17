@@ -317,13 +317,14 @@ def from_QLinearConv(onnx_model,onnx_node):
 
     # == M Scaling ==
     # See "tflite quantized matmul" in quantization notes
-    scale = scale_x * scale_w / scale_y
+    scale = (scale_x * scale_w) / scale_y
     
     # == Zero point offset ==
     # See "zeroes thereof" in quantization notes
     # zp_w is always assumed to be 0, otherwise scaling actually gets expensive
     assert zp_w.any() == False
     scaler_offset = zp_y + scale*(-kernel.sum(axis=(1,2,3)) * zp_x)
+    # scaler_offset = np.array(0)
 
     if group == 1:
         # Regular convolution
@@ -479,11 +480,7 @@ class output_scale_node(Node):
 
         fp_m = self.real_scale
         fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input_squeezed.shape)-1)))
-<<<<<<< HEAD
         out = np.round(input_squeezed * fp_m)
-=======
-        out = (input_squeezed * fp_m).astype(int)
->>>>>>> origin/main
         if self.offset.ndim == 0:
             offset_broadcast = self.offset
         else:
@@ -626,7 +623,7 @@ class add_node(Node):
         return add_node(inputs,outputs)
     
     def forward(self,inputs:list[np.ndarray]):
-        inputs = np.array(inputs).squeeze(axis=0)
+        inputs = np.array(inputs).squeeze()
         return np.sum(inputs,axis=0)
 
 class cat_node(Node):
@@ -646,7 +643,7 @@ class cat_node(Node):
         if self.axis is None:
             inputs = np.array(inputs)
             return inputs
-        return np.concatenate(inputs,axis=self.axis)
+        return np.concatenate(inputs,axis=self.axis).astype(float)
     
 class global_avg_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str]):
@@ -740,7 +737,7 @@ class toeplitzizer_node(Node):
 
         input: vector
         '''
-        input = np.array(input).squeeze(axis=0)
+        input = np.array(input[0]).squeeze(axis=0)
         out = toeplitzize_input(input,ksize=self.ksize,strides=self.strides)
         return out
     
