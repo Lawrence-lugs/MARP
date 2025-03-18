@@ -6,15 +6,18 @@ from matplotlib import patches
 import os
 from tqdm import tqdm
 
-def plot_packing_img(packer,
+def plot_bins(packer,
                  dir : str
                  ):
     '''
     From rectpack issue 16
+
+    Use to create single images of each bin.
+    Does not create a unified image.
     '''
     
-    if not os.path.exists(f'figures/{dir}'):
-        os.mkdir(f'figures/{dir}')
+    if not os.path.exists(f'{dir}'):
+        os.mkdir(f'{dir}')
 
     for index, abin in tqdm(enumerate(packer),desc='Plotting Bins'):
         bw, bh  = abin.width, abin.height
@@ -39,9 +42,9 @@ def plot_packing_img(packer,
             center_x = x + w/2
             center_y = y + h/2
             ax.annotate(str(rect.rid),(center_x,center_y))
-        fig.savefig(f'figures/{dir}/rect_{index}.png', dpi=144, bbox_inches='tight')
+        fig.savefig(f'{dir}/rect_{index}.png', dpi=144, bbox_inches='tight')
 
-def plot_packing_tiled(packer,
+def plot_packing(packer,
                  filename : str,
                  tile_count_h : int = 8,
                  ):
