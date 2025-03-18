@@ -500,6 +500,10 @@ class conv_node(Node):
         self.biases = biases
         self.matrix = kernel.reshape(kernel.shape[0],-1).T
         self.in_channel = in_channel #for depthwise convolutions
+        if in_channel is not None:
+            self.depthwise = True
+        else:
+            self.depthwise = False
         self.strides = strides
 
     @classmethod
