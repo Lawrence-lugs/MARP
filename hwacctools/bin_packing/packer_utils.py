@@ -67,8 +67,8 @@ def plot_packing(packer,
                     (x, y),  # (x,y)
                     w,          # width
                     h,          # height
-                    facecolor="#00ffff",
-                    edgecolor="black",
+                    facecolor="#f7dc6f",
+                    edgecolor="#ca6f1e",
                     linewidth=3
                 )
             )

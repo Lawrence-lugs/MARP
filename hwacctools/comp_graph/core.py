@@ -18,9 +18,23 @@ def add_rects_to_packer(packer,shapelist):
         packer.add_rect(rectw,recth,rid)
     return packer
 
+def pack_all_matrices(cgraph,core_size,packer):
+    inshapes = cgraph.split_convolutions(inshapes,H=core_size[0],W=core_size[1])
+    cgraph_shapes = inshapes._get_shape_list_id()
+
+    packer = rectpack.newPacker(rotation=False,
+                                pack_algo=rectpack.MaxRectsBssf)
+    packer = add_rects_to_packer(packer,cgraph_shapes)
+
+    packer.add_bin(*core_size,count=float("inf"))
+    packer.pack()
+    return cgraph,core_size,packer
+
+
+
 class packed_model(object):
     '''
-    Set of AIMC cores for simulation
+    Runs bin packing on a cgraph
 
     > Splits a cgraph's matrices into at most core_size sized matrices.
     > Uses rectangular packing to pack each matrix into core_size arrays
