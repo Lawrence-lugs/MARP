@@ -42,7 +42,8 @@ class packed_model(object):
     def __init__(self,
                  inshapes, 
                  core_size : tuple[int],
-                 infer = False
+                 infer = False,
+                 packer = None
                  ):
         '''
         Performs bin packing on cgraph and
@@ -67,17 +68,19 @@ class packed_model(object):
         inshapes = cgraph.split_convolutions(inshapes,H=core_size[0],W=core_size[1])
         cgraph_shapes = inshapes._get_shape_list_id(excludeDepthwise=True)
 
-        packer = rectpack.newPacker(rotation=False,
-                                    pack_algo=rectpack.MaxRectsBssf)
-        packer = add_rects_to_packer(packer,cgraph_shapes)
+        if packer is None:
+            print('Packer is none. Using default offline MaxRectsBSSF.')
+            packer = rectpack.newPacker(mode=rectpack.PackingMode.Offline, rotation=False, pack_algo=rectpack.MaxRectsBssf)
 
         packer.add_bin(*core_size,count=float("inf"))
-        packer.pack()
+        packer = add_rects_to_packer(packer,cgraph_shapes)
+        if hasattr(packer,'pack'):
+            packer.pack()
 
         if len(packer.rect_list()) != len(cgraph_shapes):
             print(f'Packing incomplete: packed {len(packer.rect_list())} vs {len(cgraph_shapes)} matrices in cgraph')
         else:
-            print(f'Packing successful: packed {len(packer.rect_list())} vs {len(cgraph_shapes)} matrices in cgraph')
+            print(f'Packing successful: packed {len(packer.rect_list())} vs {len(cgraph_shapes)} matrices in cgraph in {len(packer)} bins')
 
 
         self.ncores = len(packer)
