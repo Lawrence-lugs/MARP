@@ -177,6 +177,32 @@ class Cgraph(object):
             node.rid = id
         return shapes
 
+    def color_by_separable_type(self):
+        '''
+        Colors pointwise, depthwise, gemms, and conv nodes.
+        '''
+
+        for node in self.nodes:
+            if 'gemm' in str(type(node)):
+                node.color = '#f1948a'
+            elif 'conv' in str(type(node)):
+                if node.kernel.shape[-2:] == (1,1): # Pointwise
+                    node.color = '#85c1e9'
+                else:
+                    node.color = '#58d68d'
+
+        return self.generate_color_dict()
+
+    def generate_color_dict(self):
+        '''
+        Generates a color dictionary for the nodes in the cgraph
+        '''
+        color_dict = dict()
+        for node in self.nodes:
+            if hasattr(node,'color') and hasattr(node,'rid'):
+                color_dict[node.rid] = node.color
+        return color_dict
+
 def split_convolutions(in_cgraph:Cgraph,H:int,W:int):
     '''
     Limits the cgraph's matrices to a size limit of H, W.
@@ -196,3 +222,4 @@ def split_convolutions(in_cgraph:Cgraph,H:int,W:int):
             new_nodes.append(node)
 
     return Cgraph(new_nodes)
+

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib import patches
 import os
 from tqdm import tqdm
+from PIL import Image
 
 def plot_bins(packer,
                  dir : str
@@ -47,6 +48,7 @@ def plot_bins(packer,
 def plot_packing(packer,
                  filename : str,
                  tile_count_h : int = 8,
+                 color_dict = None
                  ):
     '''
     Plots the bins together and saves a single image
@@ -62,17 +64,25 @@ def plot_packing(packer,
             x, y, w, h = rect.x, rect.y, rect.width, rect.height
             plt.axis([0,bw,0,bh])
             # print('rectangle', w,h)
+
+            facecolor = "#f7dc6f"
+            edgecolor = "#ca6f1e"
+
+            if color_dict is not None:
+                if rect.rid in color_dict.keys():
+                    facecolor = color_dict[rect.rid]
+
             ax.add_patch(
                 patches.Rectangle(
                     (x, y),  # (x,y)
                     w,          # width
                     h,          # height
-                    facecolor="#f7dc6f",
-                    edgecolor="#ca6f1e",
+                    facecolor=facecolor,
+                    edgecolor="black",
                     linewidth=3
                 )
-            )
-    
+            )                
+ 
             center_x = x + w/2
             center_y = y + h/2
             ax.annotate(str(rect.rid),(center_x,center_y))
@@ -97,8 +107,6 @@ def plot_packing(packer,
         plt.close(fig)
 
     result.save(f'{filename}.png')
-
-from PIL import Image
 
 def combine_bin_pictures(name : str, 
                          path = './bin_figures',
