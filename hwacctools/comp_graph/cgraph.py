@@ -162,7 +162,7 @@ class Cgraph(object):
 
             return [self.edges[x] for x in output_keys]
     
-    def _get_shape_list_id(self):
+    def _get_shape_list_id(self, excludeDepthwise=True):
         '''
         Obtains the list of shapes of all matrix-containing nodes
         and assigns an ID to each depending on their position in the node list
@@ -170,6 +170,9 @@ class Cgraph(object):
         shapes = []
         for id,node in enumerate(self.nodes):
             if hasattr(node,"matrix"):
+                if excludeDepthwise:
+                    if '_dwch_' in node.outputs[0]:
+                        continue    
                 shapes.append( (*node.matrix.shape,id) )
             node.rid = id
         return shapes

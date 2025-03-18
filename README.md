@@ -55,7 +55,7 @@ out = cgraph_UUT.forward(input_dict)
 Utilities for applying rectangular bin packing algorithms on the computational graphs.
 (Most of the actual implementation is inside comp_graph/core at the moment)
 
-![](images/bin_packing.png)
+![Sample](images/bin_packing.png)
 
 ## Requirements
 

@@ -18,7 +18,7 @@ def add_rects_to_packer(packer,shapelist):
         packer.add_rect(rectw,recth,rid)
     return packer
 
-def pack_all_matrices(cgraph,core_size,packer):
+def pack_matrices(cgraph,core_size,packer):
     inshapes = cgraph.split_convolutions(inshapes,H=core_size[0],W=core_size[1])
     cgraph_shapes = inshapes._get_shape_list_id()
 
@@ -29,8 +29,6 @@ def pack_all_matrices(cgraph,core_size,packer):
     packer.add_bin(*core_size,count=float("inf"))
     packer.pack()
     return cgraph,core_size,packer
-
-
 
 class packed_model(object):
     '''
@@ -67,7 +65,7 @@ class packed_model(object):
 
         # Input is a cgraph
         inshapes = cgraph.split_convolutions(inshapes,H=core_size[0],W=core_size[1])
-        cgraph_shapes = inshapes._get_shape_list_id()
+        cgraph_shapes = inshapes._get_shape_list_id(excludeDepthwise=True)
 
         packer = rectpack.newPacker(rotation=False,
                                     pack_algo=rectpack.MaxRectsBssf)
