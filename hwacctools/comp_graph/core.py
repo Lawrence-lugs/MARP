@@ -18,7 +18,7 @@ def add_rects_to_packer(packer,shapelist):
         packer.add_rect(rectw,recth,rid)
     return packer
 
-class Aimc_acc(object):
+class packed_model(object):
     '''
     Set of AIMC cores for simulation
 
@@ -28,7 +28,7 @@ class Aimc_acc(object):
     > Only nodes with attribute "matrix" are turned into rectangles.
     '''
     def __init__(self,
-                 inshapes : any, 
+                 inshapes, 
                  core_size : tuple[int],
                  infer = False
                  ):
@@ -87,16 +87,16 @@ class Aimc_acc(object):
 
                 cell_array[y1:y2,x1:x2] = mapped_node.matrix
 
-            self.cores.append( Aimc_core(core_size,cell_array) )
+            self.cores.append( matmul_core(core_size,cell_array) )
 
         self.packer = packer
         self.cgraph = inshapes
 
         return 
 
-class Aimc_core(object):
+class matmul_core(object):
     '''
-    AIMC core with a limited buffer
+    matmul core that does everything a matmul core can do and no more than that.
 
     TODO
     '''
