@@ -48,7 +48,8 @@ def plot_bins(packer,
 def plot_packing(packer,
                  filename : str,
                  tile_count_h : int = 8,
-                 color_dict = None
+                 color_dict = None,
+                 rid_to_nid = None
                  ):
     '''
     Plots the bins together and saves a single image
@@ -85,7 +86,13 @@ def plot_packing(packer,
  
             center_x = x + w/2
             center_y = y + h/2
-            ax.annotate(str(rect.rid),(center_x,center_y))
+
+            if rid_to_nid is not None:
+                ax.annotate(str(rid_to_nid[rect.rid]),(center_x,center_y))
+            else:
+                ax.annotate(str(rect.rid),(center_x,center_y))
+
+                
         # fig.savefig(f'figures/{dir}/rect_{index}.png', dpi=144, bbox_inches='tight')
         fig.canvas.draw()
         figwh = fig.canvas.get_width_height()

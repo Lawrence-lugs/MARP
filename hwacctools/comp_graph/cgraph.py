@@ -192,6 +192,14 @@ class Cgraph(object):
                     node.color = '#58d68d'
 
         return self.generate_color_dict()
+    
+    def color_by_nid(self):
+
+        highnumber = 12312941249
+        for node in self.nodes:
+            rand = highnumber*(node.nid)
+            node.color = f'#{hex(rand)[2:8]}'
+        return self.generate_color_dict()
 
     def generate_color_dict(self):
         '''
@@ -202,6 +210,16 @@ class Cgraph(object):
             if hasattr(node,'color') and hasattr(node,'rid'):
                 color_dict[node.rid] = node.color
         return color_dict
+    
+    def rid_to_nid_dict(self):
+        '''
+        Generates a dictionary that maps rid to nid
+        '''
+        rid_to_nid = dict()
+        for node in self.nodes:
+            if hasattr(node,'rid'):
+                rid_to_nid[node.rid] = node.nid
+        return rid_to_nid
 
 def split_convolutions(in_cgraph:Cgraph,H:int,W:int):
     '''
@@ -211,14 +229,19 @@ def split_convolutions(in_cgraph:Cgraph,H:int,W:int):
     '''
     new_nodes = []
 
-    for node in in_cgraph.nodes:
+    for nid,node in enumerate(in_cgraph.nodes):
         if type(node) == cnodes.conv_node:
             replacements = splitter.split_conv_into_chunks(node,H,W)
+            for node in replacements:
+                node.nid = nid
             new_nodes.extend(replacements)
         elif type(node) == cnodes.gemm_node:
             replacements = splitter.split_gemm_into_chunks(node,H,W)
+            for node in replacements:
+                node.nid = nid
             new_nodes.extend(replacements)
         else:
+            node.nid = nid
             new_nodes.append(node)
 
     return Cgraph(new_nodes)
