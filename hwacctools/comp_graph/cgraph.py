@@ -180,16 +180,22 @@ class Cgraph(object):
     def color_by_separable_type(self):
         '''
         Colors pointwise, depthwise, gemms, and conv nodes.
+
+        red = gemm
+        blue = pointwise conv
+        green = regular conv
+
+        Depthwise convolutions are not included in the coloring.
         '''
 
         for node in self.nodes:
-            if 'gemm' in str(type(node)):
-                node.color = '#f1948a'
-            elif 'conv' in str(type(node)):
-                if node.kernel.shape[-2:] == (1,1): # Pointwise
-                    node.color = '#85c1e9'
+            if hasattr(node,'from_type'):
+                if node.from_type == 'gemm':
+                    node.color = '#f1948a' # Red
+                elif node.from_type == 'pointwise':
+                    node.color = '#85c1e9' # Blue
                 else:
-                    node.color = '#58d68d'
+                    node.color = '#58d68d' # Green
 
         return self.generate_color_dict()
     

@@ -139,9 +139,17 @@ def split_conv_into_chunks(cnode:cnodes.conv_node,H:int,W:int):
 
     output_tensorizer = cnodes.reshaper_node([cat_output_edge],cnode.outputs,channels = C)
     nodes.append(output_tensorizer)
+
+    for node in nodes:
+        if ksize == 1:
+            node.from_type = 'pointwise'
+        else:
+            node.from_type = 'conv'
+
     return nodes
 
 def split_gemm_into_chunks(cnode:cnodes.gemm_node,H:int,W:int):
+
     submatrices = split_matrix_into_chunks(cnode.matrix,H,W)
     subbiases = split_vector_into_chunks(cnode.biases,W)
 
@@ -183,4 +191,8 @@ def split_gemm_into_chunks(cnode:cnodes.gemm_node,H:int,W:int):
 
     cat = cnodes.cat_node(cat_inputs,cnode.outputs,axis=0)
     nodes.append(cat)
+
+    for node in nodes:
+        node.from_type = 'gemm'
+
     return nodes
