@@ -183,7 +183,7 @@ class Cgraph(object):
 
         red = gemm
         blue = pointwise conv
-        green = regular conv
+        yellow = regular conv
 
         Depthwise convolutions are not included in the coloring.
         '''
@@ -194,8 +194,10 @@ class Cgraph(object):
                     node.color = '#f1948a' # Red
                 elif node.from_type == 'pointwise':
                     node.color = '#85c1e9' # Blue
+                elif node.from_type == 'conv':
+                    node.color = '#58d68d' # Yellow
                 else:
-                    node.color = '#58d68d' # Green
+                    node.color = 'white'
 
         return self.generate_color_dict()
     

@@ -90,6 +90,10 @@ def split_conv_into_chunks(cnode:cnodes.conv_node,H:int,W:int):
     strides = cnode.strides
 
     if len(submatrices) == 1 and len(submatrices[0]) == 1:
+        if ksize == 1:
+            cnode.from_type = 'pointwise'
+        else:
+            cnode.from_type = 'conv'
         return [cnode]
 
     nodes = []
@@ -140,10 +144,11 @@ def split_conv_into_chunks(cnode:cnodes.conv_node,H:int,W:int):
     output_tensorizer = cnodes.reshaper_node([cat_output_edge],cnode.outputs,channels = C)
     nodes.append(output_tensorizer)
 
-    for node in nodes:
-        if ksize == 1:
+    if ksize == 1:
+        for node in nodes:
             node.from_type = 'pointwise'
-        else:
+    else:
+        for node in nodes:
             node.from_type = 'conv'
 
     return nodes
