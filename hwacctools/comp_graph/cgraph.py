@@ -20,7 +20,7 @@ class Cgraph(object):
         of nodes on the cgraph.
     '''
 
-    def __init__(self,node_list:list[cnodes.Node]): 
+    def __init__(self,node_list:list[cnodes.Node],cachePath=None): 
         '''
         Parameters
         ---------
@@ -36,18 +36,10 @@ class Cgraph(object):
                 self.edges[input] = None
             for output in node.outputs:
                 self.edges[output] = None
-
-    def check_if_node_done(self,node):
-        '''
-        Checks if the outputs of a node is already filled
-        '''
-        for output in node.outputs:
-            if self.edges[output] is None:
-                return False
-        return True
+        self.cachePath = cachePath
 
     @classmethod
-    def from_onnx_model(cls,nx_model, tiles=None):
+    def from_onnx_model(cls,nx_model, tiles=None, **kwargs):
         '''
         Obtains a `cgraph` from an ONNX model loaded in.
         '''
@@ -95,18 +87,59 @@ class Cgraph(object):
             else:
                 raise NotImplementedError(f'Node type {node.op_type} not implemented')
 
-        return Cgraph(node_list)
+        return Cgraph(node_list,**kwargs)
+
+    def check_if_node_done(self,node):
+        '''
+        Checks if the outputs of a node is already filled
+        '''
+        for output in node.outputs:
+            if self.edges[output] is None:
+                return False
+        return True
 
     def check_if_node_ready(self,node):
         '''
-        Checks if the preceding edges of a node is already filled
+        Checks if the inputs of a node is already filled
         '''
         for input in node.inputs:
             if self.edges[input] is None:
                 return False
         return True
+    
+    def ready_nodes(self):
+        '''
+        Returns a list of nodes whose input edges are ready 
+        '''
+        node_list = []
+        for node in self.nodes:
+            if self.check_if_node_done(node):
+                continue
+            if self.check_if_node_ready(node):
+                node_list.append(node)
+        return node_list
+    
+    def single_node_forward(self,node):
+        '''
+        Runs a single node's forward pass
+        '''
+        in_array = []
+        for input in node.inputs:
+            in_array.append(self.edges[input])
 
-    def forward(self,input_dict:dict,output_keys:list[str] = None,verbose=False,cachePath = None, recalculate=False, progbar=True):
+        if self.cachePath is not None:
+            try:
+                out_array = np.load(self.cachePath + f'/{node.outputs[0]}.npy',allow_pickle=True)
+            except FileNotFoundError:
+                out_array = node.forward(in_array)
+                np.save(self.cachePath + f'/{node.outputs[0]}.npy',out_array) 
+        else:
+            out_array = node.forward(in_array)
+
+        for output in node.outputs:
+            self.edges[output] = out_array
+
+    def forward(self,input_dict:dict,output_keys:list[str] = None,verbose=False, recalculate=False, progbar=True):
         '''
         Parameters
         ----------
@@ -117,11 +150,20 @@ class Cgraph(object):
         output_keys : list[str], optional
             list containing the keys of the edges whose values will
             be returned after inference.
+        verbose : bool, optional
+            If True, prints the output of each node.
+        self.cachePath : str, optional
+            If specified, the output of each node will be saved in
+            the self.cachePath directory.
+        recalculate : bool, optional
+            If true, the output of each node will be recalculated regardless of edge existence in self.cachePath
+        progbar : bool, optional
+            If True, displays a progress bar for the forward pass.
         '''
 
-        if cachePath is not None:
-            if not os.path.exists(cachePath):
-                os.makedirs(cachePath)
+        if self.cachePath is not None:
+            if not os.path.exists(self.cachePath):
+                os.makedirs(self.cachePath)
         
         for key in input_dict:
             self.edges[key] = input_dict[key]
@@ -130,31 +172,10 @@ class Cgraph(object):
             for node in tqdm(self.nodes,disable=not progbar):
                 if not self.check_if_node_ready(node):
                     continue
-
                 if self.check_if_node_done(node):
                     continue
-
                 if verbose: print(f'node:{node},\n output: {node.outputs}')
-                in_array = []
-
-                for input in node.inputs:
-                    in_array.append(self.edges[input])
-
-                if cachePath is not None:
-                    if recalculate:
-                        out_array = node.forward(in_array)
-                        np.save(cachePath + f'/{node.outputs[0]}.npy',out_array)
-                    else:
-                        try:
-                            out_array = np.load(cachePath + f'/{node.outputs[0]}.npy',allow_pickle=True)
-                        except FileNotFoundError:
-                            out_array = node.forward(in_array)
-                            np.save(cachePath + f'/{node.outputs[0]}.npy',out_array) 
-                else:
-                    out_array = node.forward(in_array)
-
-                for output in node.outputs:
-                    self.edges[output] = out_array
+                self.single_node_forward(node)
 
             if output_keys is None:
                 # Return the output of the last node

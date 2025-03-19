@@ -18,30 +18,30 @@ def add_rects_to_packer(packer,shapelist):
         packer.add_rect(rectw,recth,rid)
     return packer
 
-def pack_matrices(cgraph,core_size,packer):
-    inshapes = cgraph.split_convolutions(inshapes,H=core_size[0],W=core_size[1])
+def pack_matrices(cgraph,imc_core_size,packer):
+    inshapes = cgraph.split_convolutions(inshapes,H=imc_core_size[0],W=imc_core_size[1])
     cgraph_shapes = inshapes._get_shape_list_id()
 
     packer = rectpack.newPacker(rotation=False,
                                 pack_algo=rectpack.MaxRectsBssf)
     packer = add_rects_to_packer(packer,cgraph_shapes)
 
-    packer.add_bin(*core_size,count=float("inf"))
+    packer.add_bin(*imc_core_size,count=float("inf"))
     packer.pack()
-    return cgraph,core_size,packer
+    return cgraph,imc_core_size,packer
 
 class packed_model(object):
     '''
     Runs bin packing on a cgraph
 
-    > Splits a cgraph's matrices into at most core_size sized matrices.
-    > Uses rectangular packing to pack each matrix into core_size arrays
+    > Splits a cgraph's matrices into at most imc_core_size sized matrices.
+    > Uses rectangular packing to pack each matrix into imc_core_size arrays
     > IDs of the packed rectangles are the order of the nodes in the cgraph.
     > Only nodes with attribute "matrix" are turned into rectangles.
     '''
     def __init__(self,
                  inshapes, 
-                 core_size : tuple[int],
+                 imc_core_size : tuple[int],
                  infer = False,
                  packer = None
                  ):
@@ -53,26 +53,26 @@ class packed_model(object):
         '''
         if type(inshapes) != cgraph.Cgraph:
             # Input must be a list
-            cgraph_shapes = splitter.split_shapelist_into_chunks(inshapes,*core_size)
+            cgraph_shapes = splitter.split_shapelist_into_chunks(inshapes,*imc_core_size)
             cgraph_shapes = get_ids_for_shapelist(cgraph_shapes)
             packer = rectpack.newPacker(rotation=False,
                                         pack_algo=rectpack.MaxRectsBssf)        
             packer = add_rects_to_packer(packer,cgraph_shapes)
 
-            packer.add_bin(*core_size,count=float("inf"))
+            packer.add_bin(*imc_core_size,count=float("inf"))
             packer.pack()
             self.packer = packer
             return
 
         # Input is a cgraph
-        inshapes = cgraph.split_convolutions(inshapes,H=core_size[0],W=core_size[1])
+        inshapes = cgraph.split_convolutions(inshapes,H=imc_core_size[0],W=imc_core_size[1])
         cgraph_shapes = inshapes._get_shape_list_id(excludeDepthwise=True)
 
         if packer is None:
             print('Packer is none. Using default offline MaxRectsBSSF.')
             packer = rectpack.newPacker(mode=rectpack.PackingMode.Offline, rotation=False, pack_algo=rectpack.MaxRectsBssf)
 
-        packer.add_bin(*core_size,count=float("inf"))
+        packer.add_bin(*imc_core_size,count=float("inf"))
         packer = add_rects_to_packer(packer,cgraph_shapes)
         if hasattr(packer,'pack'):
             packer.pack()
@@ -82,14 +82,12 @@ class packed_model(object):
         else:
             print(f'Packing successful: packed {len(packer.rect_list())} vs {len(cgraph_shapes)} matrices in cgraph in {len(packer)} bins')
 
-
-        self.ncores = len(packer)
-        self.cores = []
+        self.nbins = len(packer)
 
         for bin in packer:
 
             # Prepare matrix for a new core
-            cell_array = np.zeros(core_size)
+            cell_array = np.zeros(imc_core_size)
 
             # Populate it with the mapped matrices 
             for mapped_rect in bin:
@@ -102,33 +100,87 @@ class packed_model(object):
 
                 cell_array[y1:y2,x1:x2] = mapped_node.matrix
 
-            self.cores.append( matmul_core(core_size,cell_array) )
-
         self.packer = packer
         self.cgraph = inshapes
 
         return 
-
-class matmul_core(object):
+    
+class accelerator(object):
     '''
-    matmul core that does everything a matmul core can do and no more than that.
-
-    TODO
+    Forward-pass simulation on specific simulation parameters
     '''
-
     def __init__(self,
-                 core_size : tuple[int],
+                 cgraph : cgraph.Cgraph,
+                 imc_core_size : tuple[int],
+                 num_imc_cores : int,
+                 rs_core_size : tuple[int],
+                 num_rs_cores : int
+                 ):
+        
+        self.original_cgraph = cgraph
+        self.imc_core_size = imc_core_size
+        self.num_imc_cores = num_imc_cores
+        self.rs_core_size = rs_core_size
+        self.num_rs_cores = num_rs_cores
+        self.packed_model = packed_model(cgraph,imc_core_size)
+        return
+    
+    def simulate_inference(self):
+
+        imc_core_loads = np.zeros(self.num_imc_cores)
+        rs_core_loads = np.zeros(self.num_rs_cores)
+
+        # Let's put this on hold for now, because I don't know how to map depthwise to the RS core yet!        
+
+        return
+
+class row_stationary_core(object):
+    '''
+    Row stationary accelerator model
+
+    TODO: Model properly based on dimension
+    '''
+    def __init__(self,
+                 kernel,
+                 pe_array_size : tuple[int]
+                 ):
+        self.kernel = kernel
+        return
+
+    def __call__(self, input_matrix : np.ndarray):
+        '''
+        Parameters
+        ----------
+        input_matrix : np.ndarray,
+            input matrix to be convolved
+        '''
+        return
+
+class imc_accelerator_core(object):
+    '''
+    Contains operations performable by a single accelerator core
+    '''
+    def __init__(self,
+                 imc_core_size : tuple[int],
                  matrix : np.ndarray
                  ):
         '''
         Parameters
         ----------
-        core_size : tuple(int,int),
+        imc_core_size : tuple(int,int),
             dimensions of bitcell array
         matrix : np.ndarray,
             weights loaded into bitcell array
         '''
-        self.cell_array = matrix
-        self.input_buffer = np.empty( core_size[0] )    
-        self.output_buffer = np.empty( core_size[1] )
+        self.matrix = matrix
+        self.imc_core_size = imc_core_size
         return
+    
+    def load_matrix(self,matrix):
+        '''
+        Loads a matrix into the core
+        '''
+        self.matrix = matrix
+        self.loads += 1
+        return
+    
