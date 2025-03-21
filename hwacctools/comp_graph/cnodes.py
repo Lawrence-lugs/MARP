@@ -278,7 +278,7 @@ def from_QLinearMatMul(onnx_model,onnx_node):
 
     return output_nodes
 
-def from_QLinearConv(onnx_model,onnx_node):
+def from_QLinearConv(onnx_model,onnx_node,channel_minor=True):
     '''
     Creates a set of nodes equivalent to an ONNX QLinearConv
     
@@ -329,7 +329,7 @@ def from_QLinearConv(onnx_model,onnx_node):
     if group == 1:
         # Regular convolution
         output_nodes = [
-            conv_node(inputs,scaler_input,kernel,biases,strides=strides),
+            conv_node(inputs,scaler_input,kernel,biases,strides=strides,channel_minor=channel_minor),
             output_scale_node(scaler_input,outputs,scale,offset=scaler_offset)
         ]
     else:
@@ -491,20 +491,29 @@ class output_scale_node(Node):
         return out
 
 class conv_node(Node):
-    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, in_channel = None, strides = 1):
+    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, in_channel = None, strides = 1, channel_minor = False):
         '''
-        Creates a conv node from a kernel of shape O,I,H,W
+        Creates a conv node from a kernel of shape K,C,H,W
+
+        Matrix version is column major (K, C H W) by default
+        If channel_minor is True, then it is row major (K, H W C)
         '''
         super(conv_node,self).__init__(inputs,outputs)
         self.kernel = kernel
         self.biases = biases
-        self.matrix = kernel.reshape(kernel.shape[0],-1).T
+
+        if channel_minor:
+            self.matrix = kernel.transpose(0,2,3,1).reshape(kernel.shape[0],-1).T
+        else:
+            self.matrix = kernel.reshape(kernel.shape[0],-1).T
+        
         self.in_channel = in_channel #for depthwise convolutions
         if in_channel is not None:
             self.depthwise = True
         else:
             self.depthwise = False
         self.strides = strides
+        self.channel_minor = channel_minor
 
     @classmethod
     def from_onnx_node(self,onnx_model,onnx_node):
@@ -561,7 +570,7 @@ class conv_node(Node):
         if self.in_channel is not None:
             input = np.expand_dims(input[self.in_channel],0)
 
-        flat_input = toeplitzize_input(input,ksize=self.kernel.shape[-1],strides=self.strides)
+        flat_input = toeplitzize_input(input,ksize=self.kernel.shape[-1],strides=self.strides,channel_minor=self.channel_minor)
         # print(flat_input.shape)
 
         flat_out = flat_input @ self.matrix

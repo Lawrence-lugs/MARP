@@ -7,7 +7,7 @@ def get_recfield_for_pixel(r,c,matrix,ksize):
     if ksize == 3:
         return matrix[r:r+3,c:c+3].transpose(2,0,1)
 
-def toeplitzize_input(in_tensor,ksize=3,strides=1):
+def toeplitzize_input(in_tensor,ksize=3,strides=1,channel_minor = False):
     '''
     Flattens input tensor into a Toeplitz matrix for passing into a
     flattened kernel. Zero pads by default.
@@ -24,17 +24,18 @@ def toeplitzize_input(in_tensor,ksize=3,strides=1):
     W = tensor.shape[1] // strides
     C = tensor.shape[2] 
 
-    # For now, padsame all 3x3 kernels (for mbv2)
-    # Pointwise convolutions are not padded
     if ksize == 3:
         tensor2 = np.pad(tensor,((1,1),(1,1),(0,0)))
         out = np.empty((H*W,C*9))
     else:
         tensor2 = tensor
         out = np.empty((H*W,C))
-
     for r in range(H):
         for c in range(W):
-            out[r*W + c] = get_recfield_for_pixel(strides*r,strides*c,tensor2,ksize).flatten()
+            recfield = get_recfield_for_pixel(strides*r,strides*c,tensor2,ksize)
+            if channel_minor:
+                out[r*W + c] = recfield.transpose(1,2,0).flatten()
+            else:
+                out[r*W + c] = recfield.flatten()
 
     return out
