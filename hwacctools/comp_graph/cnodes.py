@@ -278,7 +278,7 @@ def from_QLinearMatMul(onnx_model,onnx_node):
 
     return output_nodes
 
-def from_QLinearConv(onnx_model,onnx_node,channel_minor=True):
+def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     '''
     Creates a set of nodes equivalent to an ONNX QLinearConv
     
