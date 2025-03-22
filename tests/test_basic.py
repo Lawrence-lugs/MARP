@@ -17,3 +17,10 @@ def test_packed_cgraph_inference(core_packed,img_array):
     input_dict = {'input': img_array}
     out = core_packed.cgraph.forward(input_dict, recalculate=False) 
     assert np.squeeze(out).argmax() == 12
+
+def test_hwc_inference(nx_model,img_array):    
+    cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model,cachePath = '.cgraph_cache', channel_minor=True)     
+    input_dict = {'input': img_array}
+    out = cgraph_UUT.forward(input_dict, recalculate=False)
+    assert cgraph_UUT.nodes[1].channel_minor == True 
+    assert np.squeeze(out).argmax() == 12

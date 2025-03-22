@@ -39,7 +39,7 @@ class Cgraph(object):
         self.cachePath = cachePath
 
     @classmethod
-    def from_onnx_model(cls,nx_model, tiles=None, **kwargs):
+    def from_onnx_model(cls,nx_model, tiles=None, channel_minor=False, **kwargs):
         '''
         Obtains a `cgraph` from an ONNX model loaded in.
         '''
@@ -65,7 +65,7 @@ class Cgraph(object):
             elif node.op_type == 'QuantizeLinear':
                 node_list.append(cnodes.quantize_node.from_onnx_node(nx_model,node))
             elif node.op_type == 'QLinearConv':
-                node_list.extend(cnodes.from_QLinearConv(nx_model,node))
+                node_list.extend(cnodes.from_QLinearConv(nx_model,node,channel_minor=channel_minor))
             elif node.op_type == 'QLinearAdd':
                 node_list.append(cnodes.quantized_linear_add_node.from_onnx_node(nx_model,node))
             elif node.op_type == 'QLinearGlobalAveragePool':

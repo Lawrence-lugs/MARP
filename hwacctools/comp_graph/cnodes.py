@@ -495,7 +495,7 @@ class conv_node(Node):
         '''
         Creates a conv node from a kernel of shape K,C,H,W
 
-        Matrix version is column major (K, C H W) by default
+        Matrix version is channel major (K, C H W) by default
         If channel_minor is True, then it is row major (K, H W C)
         '''
         super(conv_node,self).__init__(inputs,outputs)
