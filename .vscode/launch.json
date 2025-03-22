@@ -1,0 +1,11 @@
+{
+    "configurations": [
+        {
+            "name": "Test: Run All Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+        }
+    ]
+}

@@ -8,7 +8,6 @@ def try_len_flatten(i):
         return 0
 
 def get_feature_sizes(cgraph):
-
     feature_sizes = { k:try_len_flatten(v) for (k,v) in cgraph.edges.items()}
     # clean up
     keys_to_remove = []

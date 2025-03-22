@@ -10,50 +10,36 @@ import onnxruntime as ort
 from onnx import helper
 import hwacctools.onnx_utils as onnx_utils
 import pandas as pd
-df = pd.DataFrame
+import pytest
 
-# def test_import_bin_packing():
-#     import bin_packing.hybrid_first_fit
-#     import bin_packing.model_flattener
-#     import bin_packing.objects
-
-# def test_import_quantization():
-#     import quantization.quant
-
-@pytest.mark.skipif("not config.getoption('full')")
-def test_cgraph_inference():
+@pytest.fixture
+def nx_model():
     modelpath = 'onnx_models/mobilenetv2-12-int8.onnx'
-
     nx_model = onnx.load(modelpath)
+    return nx_model
+
+@pytest.fixture
+def img_array():
     img = Image.open('images/imagenet_finch.jpeg')
     img_tensor = transforms.ToTensor()(img).float()
     img_tensor = transforms.CenterCrop(224)(img_tensor)
     # tensor_input = img_tensor.unsqueeze()
     img_array = np.array(img_tensor)
     img_array = np.expand_dims(img_array, axis=0)
+    return img_array
 
-    input_dict = {
-        'input':img_array
-    }
+@pytest.fixture
+def cgraph_uut(nx_model,img_array):
+    cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model,cachePath = '.cgraph_cache') 
+    return cgraph_UUT
 
-    # ! rm -rf .cgraph_cache
+def test_cgraph_inference(cgraph_uut,img_array):
+    input_dict = {'input': img_array}
+    out = cgraph_uut.forward(input_dict, recalculate=False) 
+    assert np.squeeze(out).argmax() == 12
 
-    cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model)
-    out = cgraph_UUT.forward(input_dict,cachePath = '/home/lquizon/lawrence-workspace/SRAM_test/qrAcc2/qr_acc_2_digital/hwacc_design_garage/.cgraph_cache', recalculate=False) 
-    top5 = np.argsort(out)[0][-5:]
-    assert top5[-1] == 12
-
-def test_onnx_inference():
+def test_onnx_inference(img_array):
     modelpath = 'onnx_models/mobilenetv2-12-int8.onnx'
-
-    nx_model = onnx.load(modelpath)
-    img = Image.open('images/imagenet_finch.jpeg')
-    img_tensor = transforms.ToTensor()(img).float()
-    img_tensor = transforms.CenterCrop(224)(img_tensor)
-    # tensor_input = img_tensor.unsqueeze()
-    img_array = np.array(img_tensor)
-    img_array = np.expand_dims(img_array, axis=0)
-
-    a = onnx_utils.get_intermediate_tensor_value(nx_model, "output", img_array)
+    a = onnx_utils.get_intermediate_tensor_value(modelpath, "output", img_array)
     top5 = np.argsort(a)[0][-5:]
     assert top5[-1] == 12

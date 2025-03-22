@@ -36,9 +36,10 @@
         }
     },
     "verilog.linting.linter": "verilator",
-    "verilog.linting.verilator.arguments": "../rtl/qracc_pkg.svh",
+    "verilog.linting.verilator.arguments": "--timing ../rtl/qracc_pkg.svh",
     "verilog.linting.verilator.includePath": [
         "rtl/activation_buffer",
-        "rtl/output_scaler"
+        "rtl/output_scaler",
+        "rtl/feature_loader"
     ]
 }
