@@ -240,13 +240,9 @@ dependencies:
   - zstd=1.5.5=hfc55251_0
   - pip:
       - fsspec==2024.3.1
-      - netron==7.4.5
       - nobuco==0.11.5
       - onnx==1.15.0
       - protobuf==3.20.3
-      - pycocotools==2.0.7
-      - pyvww==0.1.1
       - rectpack==0.2.2
       - sty==1.0.6
-      - tf2onnx==1.16.1
 prefix: /home/lquizon/miniforge3/envs/torch-tf
