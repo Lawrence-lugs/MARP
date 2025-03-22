@@ -1,6 +1,7 @@
 from hwacctools.comp_graph import splitter, cnodes, cgraph
 import numpy as np
 import pytest
+import hwacctools.onnx_utils as onnx_utils
 
 def test_cgraph_inference(cgraph_uut,img_array):
     out = cgraph_uut.edges['output'] 
