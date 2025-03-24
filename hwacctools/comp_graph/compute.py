@@ -33,7 +33,7 @@ def toeplitzize_input(in_tensor,ksize=3,strides=1,channel_minor = False):
     for r in range(H):
         for c in range(W):
             recfield = get_recfield_for_pixel(strides*r,strides*c,tensor2,ksize)
-            if channel_minor:
+            if channel_minor and ksize == 3:
                 out[r*W + c] = recfield.transpose(1,2,0).flatten()
             else:
                 out[r*W + c] = recfield.flatten()
