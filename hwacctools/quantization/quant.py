@@ -232,12 +232,22 @@ def binary_array_to_int(array,signed=False,outBits=None):
     ''' 
     Convert a binary array to an integer 
     The binary array is assumed to be in the last dimension
+    [
+    [ 0, 1, 1, 0],
+    [ 1, 0, 0, 1],
+    ...
+    ]
     '''
     out = 0
     arr = np.moveaxis(array,-1,0)
     for bit in arr:
         out = (out << 1) | bit
     return out
+
+def array_bin_to_int(array,signed=False,outBits=None):
+    shape = array.shape
+    pows = np.array([2**i for i in range(shape[-1])])[::-1]
+    return np.sum(pows*array,axis=1)
 
 def int_to_bin(n, bits):
     " Convert an integer to a binary array "
