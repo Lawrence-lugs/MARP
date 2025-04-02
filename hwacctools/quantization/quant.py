@@ -297,3 +297,37 @@ def po2_accumulate_real(a,verbose=False):
         accs.append(acc.T[::-1].T.astype(int))
     if verbose: print(df(accs))
     return acc
+
+def fprint_as_hex(
+    filepath,
+    array,
+    elementBits = 8,
+    wordSize = 32
+    ):
+
+    a = array.flatten()
+
+    with open(filepath, 'w') as f:
+        for i in range(0, len(a), wordSize // elementBits):
+            hex_str = ''.join([f'{int(x):02x}' for x in a[i:i + wordSize // elementBits]])
+            f.write(hex_str + '\n')
+        f.write('\n')
+
+    return
+
+def as_packed_hex(
+    array,
+    elementBits = 8,
+    wordSize = 32
+    ):
+    """
+    Convert an array to a packed hex string.
+    """
+    a = array.flatten()
+    out = np.array([], dtype=str)
+
+    for i in range(0, len(a), wordSize // elementBits):
+        hex_str = ''.join([f'{int(x):02x}' for x in a[i:i + wordSize // elementBits]])
+        out = np.append(out, hex_str)
+
+    return out
