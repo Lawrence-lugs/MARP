@@ -185,6 +185,8 @@ def convert_to_fixed_point_int(number,precision):
     " Convert a float [0,1] to fixed point binary "
     return int(convert_to_fixed_point(number,precision),base=2)
 
+vconvert_to_fixed_point_int = np.vectorize(convert_to_fixed_point_int)
+
 def fixed_point_to_float(number,precision):
     " Convert a fixed point binary to float [0,1] "
     out = 0
