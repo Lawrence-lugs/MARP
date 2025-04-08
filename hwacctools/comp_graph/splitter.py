@@ -159,7 +159,8 @@ def split_gemm_into_chunks(cnode:cnodes.gemm_node,H:int,W:int):
     subbiases = split_vector_into_chunks(cnode.biases,W)
 
     if len(submatrices) == 1:
-        return [cnode]
+        if len(submatrices[0]) == 1:
+            return [cnode]
 
     nodes = []
 

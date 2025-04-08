@@ -145,6 +145,30 @@ class unsqueeze_node(Node):
         a = np.expand_dims(a,axis=self.axis)
         return a
 
+class squeeze_node(Node):
+    def __init__(self, inputs:list[str], outputs:list[str]):
+        '''
+        Creates a node that squeezes in a specific attribute axis
+        '''
+        super(squeeze_node,self).__init__(inputs,outputs)
+
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'Squeeze':
+            raise TypeError('Input node is not an Unsqueeze node')
+
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+
+        # axis = get_attribute_by_name('axes',onnx_node.attribute).i
+
+        return squeeze_node(inputs,outputs)
+    
+    def forward(self,input:np.array):
+        a = input[0]
+        return a.squeeze()
+
+
 class concat_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], axis:int, to_concat:np.array):
         '''
@@ -427,13 +451,16 @@ class quantized_linear_add_node(Node):
     @classmethod
     def from_onnx_node(self,onnx_model,onnx_node):
 
-        # Check if input[3] is an initializer!
+        inputs = [onnx_node.input[0],onnx_node.input[3]]
+        other_initializer = None
+        
+        # Check if either input is an initializer!
         if( is_initializer(onnx_model,onnx_node.input[3]) ):
             inputs = [onnx_node.input[0]]
             other_initializer = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3]))
-        else: # other input is input
-            inputs = [onnx_node.input[0],onnx_node.input[3]]
-            other_initializer = None
+        if( is_initializer(onnx_model,onnx_node.input[0]) ):
+            inputs = [onnx_node.input[3]]
+            other_initializer = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[0]))
         
         outputs = onnx_node.output
 

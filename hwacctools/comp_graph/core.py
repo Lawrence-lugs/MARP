@@ -83,6 +83,7 @@ class packed_model(object):
             print(f'Packing successful: packed {len(packer.rect_list())} vs {len(cgraph_shapes)} matrices in cgraph in {len(packer)} bins')
 
         self.nbins = len(packer)
+        self.cgraph_shapes = cgraph_shapes
 
         for bin in packer:
 

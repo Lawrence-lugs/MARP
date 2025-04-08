@@ -80,10 +80,14 @@ class Cgraph(object):
                 node_list.append(cnodes.gather_node.from_onnx_node(nx_model,node))
             elif node.op_type == 'Unsqueeze':
                 node_list.append(cnodes.unsqueeze_node.from_onnx_node(nx_model,node))
+            elif node.op_type == 'Squeeze':
+                node_list.append(cnodes.squeeze_node.from_onnx_node(nx_model,node))
             elif node.op_type == 'Concat':
                 node_list.append(cnodes.concat_node.from_onnx_node(nx_model,node))
             elif node.op_type == 'QLinearMatMul':
                 node_list.extend(cnodes.from_QLinearMatMul(nx_model,node))
+            elif node.op_type == 'QLinearAveragePool': # For now, all average pools are global
+                node_list.append(cnodes.quantized_global_avg_pool_node.from_onnx_node(nx_model,node))
             else:
                 raise NotImplementedError(f'Node type {node.op_type} not implemented')
 
