@@ -5,6 +5,7 @@ from . import cnodes
 from tqdm import tqdm
 from . import splitter
 import os
+from .. import onnx_utils
 
 class Cgraph(object):
     '''
@@ -37,6 +38,15 @@ class Cgraph(object):
             for output in node.outputs:
                 self.edges[output] = None
         self.cachePath = cachePath
+
+    def get_cgraph_node_by_output(self,output):
+        '''
+        Returns the node corresponding to the output
+        '''
+        for node in self.nodes:
+            if output in node.outputs:
+                return node
+        raise ValueError(f'Output {output} not found in cgraph')
 
     @classmethod
     def from_onnx_model(cls,nx_model, tiles=None, channel_minor=False, **kwargs):
@@ -279,3 +289,41 @@ def split_convolutions(in_cgraph:Cgraph,H:int,W:int):
 
     return Cgraph(new_nodes)
 
+def compare_with_onnx(
+    modelpath,
+    cgraph,
+    input_tensor_name,
+    output_tensor_name,
+    cgraph_input_dict,
+    verbose=False
+):
+
+    tensor_in = onnx_utils.get_intermediate_tensor_value(
+        modelpath, 
+        tensor_name= input_tensor_name,
+        input_dict= cgraph_input_dict
+    )
+    scaler_node = cgraph.get_cgraph_node_by_output(output_tensor_name)
+    conv_node = cgraph.get_cgraph_node_by_output(input_tensor_name + '_scaler_input')
+    interm = conv_node.forward([tensor_in])
+    cgraph = scaler_node.forward([interm])
+
+    ref = onnx_utils.get_intermediate_tensor_value(
+        modelpath, 
+        tensor_name=output_tensor_name,
+        input_dict= cgraph_input_dict
+    )
+
+    # if (verbose) : # Print the cgraph and ref tensors
+    #     print(f'cgraph shape: {cgraph.shape}')
+    #     print(f'ref shape: {ref.shape}')
+    #     print(f'cgraph: {cgraph}')
+    #     print(f'ref: {ref}')
+
+    if (cgraph == ref).all():
+        return True
+    else:
+        print(f'cgraph shape: {cgraph.shape}')
+        print(f'cgraph - ref: {cgraph - ref}')
+
+    return (cgraph == ref).all() # True

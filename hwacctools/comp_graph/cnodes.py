@@ -349,7 +349,7 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     assert zp_w.any() == False
     scaler_offset = zp_y + scale*(-kernel.sum(axis=(1,2,3)) * zp_x)
     # scaler_offset = np.array(0)
-
+ 
     if group == 1:
         # Regular convolution
         output_nodes = [

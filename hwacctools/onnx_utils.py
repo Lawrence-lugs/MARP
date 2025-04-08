@@ -11,13 +11,19 @@ def add_tensor_to_model_outputs(model, tensor_name):
     model.graph.output.append(layer_value_info)
     return model
 
-def get_intermediate_tensor_value(modelpath, tensor_name, img_array):      
+def get_intermediate_tensor_value(modelpath, tensor_name, input_array = None, input_dict = None):
+    if input_array is None and input_dict is None:
+        raise ValueError("Either input_array or input_dict must be provided.")
+
+    if input_dict is None:
+        input_dict = {'input': input_array}         
+
     model = onnx.load(modelpath)
     model = add_tensor_to_model_outputs(model, tensor_name)
     # The desired tensor is the last one in the outputs list
-    return infer(model, img_array)[-1]
+    return infer(model, input_dict)[-1]
 
-def infer(nx_model, img_array):
+def infer(nx_model, input_dict):
     session = ort.InferenceSession(nx_model.SerializeToString())
-    outputs = session.run(None, {"input": img_array})
+    outputs = session.run(None, input_dict)
     return outputs
