@@ -287,13 +287,15 @@ def from_QLinearMatMul(onnx_model,onnx_node):
     # == M Scaling ==
     # See "tflite quantized matmul" in quantization notes
     scale = (scale_x * scale_w) / scale_y
+    print(f'scale:{scale},\n scale_x: {scale_x},\n scale_w: {scale_w},\n scale_y: {scale_y}')
     
     # == Zero point offset ==
     # See "zeroes thereof" in quantization notes
-    # zp_w is always assumed to be 0, otherwise scaling actually gets expensiv
+    # zp_w is always assumed to be 0, otherwise scaling actually gets expensive
     assert zp_w.any() == False
     scaler_offset = zp_y - scale*(matrix.sum(axis=0) * zp_x)
     # scaler_offset = np.array(0) 
+    print(f'scaler_offset: {scaler_offset}')
 
     output_nodes = [
         gemm_node(inputs,scaler_input,matrix,biases),
@@ -600,7 +602,7 @@ class conv_node(Node):
         flat_input = toeplitzize_input(input,ksize=self.kernel.shape[-1],strides=self.strides,channel_minor=self.channel_minor)
         # print(flat_input.shape)
 
-        flat_out = flat_input @ self.matrix
+        flat_out = flat_input.astype(float) @ self.matrix.astype(float)
         for row in flat_out:
             row+=self.biases
             
@@ -757,7 +759,7 @@ class gemm_node(Node):
         input: vector
         '''
         input = np.array(input).squeeze(axis=0)
-        out = (input @ self.matrix) + self.biases
+        out = (input.astype(float) @ self.matrix.astype(float)) + self.biases.astype(float)
 
         return out
     
