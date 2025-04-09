@@ -325,12 +325,12 @@ def compare_with_onnx(
         print('PASSED')
         return scaler_node, conv_node, cgraph, ref, interm
     else:
-        print(scaler_node, conv_node)
-        print(scaler_node.outputs, conv_node.outputs)
-        print(f'shape: {cgraph.shape}')
-        print(f'pre-scaling: {interm}')
-        print(f'cgraph_output: {cgraph}')
-        print(f'onnx_output: {ref}')
+        # print(scaler_node, conv_node)
+        # print(scaler_node.outputs, conv_node.outputs)
+        # print(f'shape: {cgraph.shape}')
+        # print(f'pre-scaling: {interm}')
+        # print(f'cgraph_output: {cgraph}')
+        # print(f'onnx_output: {ref}')
         print('FAILED')
         return scaler_node, conv_node, cgraph, ref, interm
 

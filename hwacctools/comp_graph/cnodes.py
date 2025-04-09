@@ -327,16 +327,16 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     outputs = onnx_node.output
 
     # Quantization-related parameters
-    scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
-    scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4]))
-    scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6]))
-    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
-    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5]))
-    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7]))
+    scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1])).astype(float)
+    scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4])).astype(float)
+    scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6])).astype(float)
+    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2])).astype(float)
+    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5])).astype(float)
+    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7])).astype(float)
 
     # Matrix Parameters
-    kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3]))
-    biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8]))
+    kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3])).astype(float)
+    biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(float)
 
     strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
     group = get_attribute_by_name('group',onnx_node.attribute).i
@@ -349,30 +349,37 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     # See "zeroes thereof" in quantization notes
     # zp_w is always assumed to be 0, otherwise scaling actually gets expensive
     assert zp_w.any() == False
-    scaler_offset = zp_y + scale*(-kernel.sum(axis=(1,2,3)) * zp_x)
+
+    # K C H W kernel
+
+    wadds = zp_x * kernel.sum(axis=(1,2,3)) # ZX*SUM(W) 
+    # gadds is always 0 if zp_w is 0
+    # gadds = kernel.shape[-1]*kernel.shape[-2]*zp_x*zp_w # general adds, as in N*Z1*Z2
+
+    scaler_offset = zp_y + scale * (-wadds)
     # scaler_offset = np.array(0)
  
     if group == 1:
         # Regular convolution
         output_nodes = [
-            conv_node(inputs,scaler_input,kernel,biases,strides=strides,channel_minor=channel_minor),
+            conv_node(inputs,scaler_input,kernel,biases,strides=strides,channel_minor=channel_minor,zero_point=zp_x),
             output_scale_node(scaler_input,outputs,scale,offset=scaler_offset)
         ]
     else:
         # Depthwise convolution
-        nodes, concatenator = generate_depthwise_nodes(inputs,scaler_input,kernel,biases,strides)
+        nodes, concatenator = generate_depthwise_nodes(inputs,scaler_input,kernel,biases,strides, zero_point=zp_x)
         output_nodes = nodes + [concatenator,output_scale_node(scaler_input,outputs,scale=scale,offset=scaler_offset)]
 
     return output_nodes
 
-def generate_depthwise_nodes(inputs,outputs,kernels,biases,strides):
+def generate_depthwise_nodes(inputs,outputs,kernels,biases,strides,zero_point=0):
 
     dwnode_outputs = [f'{outputs[0]}_dwch_{i}' for i,ker in enumerate(kernels)]
 
     nodes = []
     for i,kern in enumerate(kernels):
         output_for_this_dwnode = [f'{outputs[0]}_dwch_{i}']
-        nodes.append(conv_node(inputs,output_for_this_dwnode,kernels[i],biases[i],in_channel=i,strides=strides))
+        nodes.append(conv_node(inputs,output_for_this_dwnode,kernels[i],biases[i],in_channel=i,strides=strides,zero_point=zero_point))
 
     concatenator = cat_node(dwnode_outputs,outputs) #Make a concatenator node
 
@@ -504,7 +511,7 @@ class output_scale_node(Node):
         self.scale_precision = scale_precision
 
     def forward(self,input:np.array):
-        input_squeezed = np.array(input).squeeze()
+        input_squeezed = np.array(input).squeeze().astype(float)
         # black magic needed to force fp_m multiplication to broadcast along the first dimension of out (C)
 
         fp_m = self.real_scale
@@ -520,12 +527,16 @@ class output_scale_node(Node):
         return out
 
 class conv_node(Node):
-    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, in_channel = None, strides = 1, channel_minor = False):
+    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, in_channel = None, strides = 1, channel_minor = False, zero_point = 0):
         '''
         Creates a conv node from a kernel of shape K,C,H,W
 
         Matrix version is channel major (K, C H W) by default
         If channel_minor is True, then it is row major (K, H W C)
+
+        Zero-point is used to zero-pad integer-only convolutions.
+        In integer-only convolutions, the zero-point is the value needed to be used for 
+        zero padding, as it's the value that represents zero.
         '''
         super(conv_node,self).__init__(inputs,outputs)
         self.kernel = kernel
@@ -543,6 +554,9 @@ class conv_node(Node):
             self.depthwise = False
         self.strides = strides
         self.channel_minor = channel_minor
+
+        # For integer-only convolutions
+        self.zero_point = zero_point
 
     @classmethod
     def from_onnx_node(self,onnx_model,onnx_node):
@@ -599,7 +613,7 @@ class conv_node(Node):
         if self.in_channel is not None:
             input = np.expand_dims(input[self.in_channel],0)
 
-        flat_input = toeplitzize_input(input,ksize=self.kernel.shape[-1],strides=self.strides,channel_minor=self.channel_minor)
+        flat_input = toeplitzize_input(input,ksize=self.kernel.shape[-1],strides=self.strides,channel_minor=self.channel_minor, zero_point=self.zero_point)
         # print(flat_input.shape)
 
         flat_out = flat_input.astype(float) @ self.matrix.astype(float)
@@ -607,8 +621,8 @@ class conv_node(Node):
             row+=self.biases
             
         # output a C,H,W tensor
-        C = flat_out.shape[1] 
         H = input.shape[1] // self.strides
+        C = flat_out.shape[1] 
         W = input.shape[2] // self.strides
 
         out = flat_out.T.reshape(1,C,H,W)
