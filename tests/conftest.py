@@ -44,10 +44,15 @@ def img_array():
     return img_array
 
 @pytest.fixture
+def input_dict(nx_model,img_array):
+    input_name = nx_model.graph.input[0].name
+    input_dict = {input_name: img_array}
+    return input_dict
+
+@pytest.fixture
 def cgraph_uut(nx_model,img_array):
-    cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model)     
-    input_dict = {'input': img_array}
-    cgraph_UUT.forward(input_dict, recalculate=False) 
+    cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model)
+    # cgraph_UUT.forward(input_dict, recalculate=False) 
     return cgraph_UUT
 
 @pytest.fixture

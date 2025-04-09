@@ -1,4 +1,4 @@
-from hwacctools.comp_graph import cnodes
+from hwacctools.comp_graph import cnodes, cgraph
 import numpy as np
 import pytest
 import torch
@@ -13,20 +13,17 @@ def qlinearconv_forward_output(cgraph_uut,nx_model,img_array):
     a = u_scaler.forward([interm])
     return a, interm
 
-@pytest.mark.skip("This test is failing. The output of the QLinearConv node is not matching the output of the QLinearConv node in the onnx model, but it's close enough for top1 in the finch.")
-def test_from_qlinearconv(qlinearconv_forward_output,modelpath,img_array):
-    a, interm = qlinearconv_forward_output
-    ref = onnx_utils.get_intermediate_tensor_value(modelpath, '474_quantized', img_array)
-    assert not (ref-a).any()
+def test_from_qlinearconv(cgraph_uut,modelpath,input_dict):
 
-def test_from_qlinearconv_convonly(qlinearconv_forward_output,cgraph_uut):
-    a, interm = qlinearconv_forward_output
-    t_1 = torch.tensor(cgraph_uut.edges['input_quantized'], dtype=torch.int32)
-    t_kern = torch.tensor(cgraph_uut.nodes[1].kernel, dtype=torch.int32)
-    t_bias = torch.tensor(cgraph_uut.nodes[1].biases, dtype=torch.int32)
-    t_conv = F.conv2d(t_1, t_kern, padding=1, stride=2)
-    t_res = t_conv + t_bias.view(1, -1, 1, 1)
-    assert not ( t_res - interm ).any()
+    res = cgraph.compare_with_onnx(
+        modelpath = modelpath,
+        cgraph = cgraph_uut,
+        input_tensor_name = 'input_quantized',
+        output_tensor_name = '474_quantized',
+        cgraph_input_dict = input_dict,
+    )
+    
+    assert res
 
 def test_from_qlinearmatmul(cgraph_uut,nx_model,modelpath,img_array):
     res_cg = onnx_utils.get_intermediate_tensor_value(modelpath, '472_quantized', img_array).astype(int)

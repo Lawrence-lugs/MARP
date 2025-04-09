@@ -301,13 +301,15 @@ def compare_with_onnx(
     tensor_in = onnx_utils.get_intermediate_tensor_value(
         modelpath, 
         tensor_name= input_tensor_name,
-        input_dict= cgraph_input_dict
+        input_dict = cgraph_input_dict
     )
+
     scaler_node = cgraph.get_cgraph_node_by_output(output_tensor_name)
     conv_node = cgraph.get_cgraph_node_by_output(input_tensor_name + '_scaler_input')
     interm = conv_node.forward([tensor_in])
     cgraph = scaler_node.forward([interm])
 
+    # input_name = onnx.load(modelpath).graph.input[0].name
 
     ref = onnx_utils.get_intermediate_tensor_value(
         modelpath, 
@@ -323,15 +325,16 @@ def compare_with_onnx(
 
     if (cgraph == ref).all():
         print('PASSED')
-        return scaler_node, conv_node, cgraph, ref, interm
+    #     return scaler_node, conv_node, cgraph, ref, interm
     else:
         # print(scaler_node, conv_node)
         # print(scaler_node.outputs, conv_node.outputs)
         # print(f'shape: {cgraph.shape}')
         # print(f'pre-scaling: {interm}')
-        # print(f'cgraph_output: {cgraph}')
+        print(f'maxdiff: {(cgraph - ref).max()}')
+        print(f'mindiff: {(cgraph - ref).min()}')
         # print(f'onnx_output: {ref}')
         print('FAILED')
-        return scaler_node, conv_node, cgraph, ref, interm
+        # return scaler_node, conv_node, cgraph, ref, interm
 
     return (cgraph == ref).all() # True

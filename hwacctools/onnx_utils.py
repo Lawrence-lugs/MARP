@@ -18,9 +18,13 @@ def get_intermediate_tensor_value(modelpath, tensor_name, input_array = None, in
     if input_dict is None:
         input_dict = {'input': input_array}         
 
-    model = onnx.load(modelpath)
+    if type(modelpath) == str:
+        model = onnx.load(modelpath)
+    else :
+        model = modelpath.SerializeToString()
+    
     model = add_tensor_to_model_outputs(model, tensor_name)
-    # The desired tensor is the last one in the outputs list
+    
     return infer(model, input_dict)[-1]
 
 def infer(nx_model, input_dict):

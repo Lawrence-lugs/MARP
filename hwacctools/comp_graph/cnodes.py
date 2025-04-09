@@ -287,7 +287,6 @@ def from_QLinearMatMul(onnx_model,onnx_node):
     # == M Scaling ==
     # See "tflite quantized matmul" in quantization notes
     scale = (scale_x * scale_w) / scale_y
-    print(f'scale:{scale},\n scale_x: {scale_x},\n scale_w: {scale_w},\n scale_y: {scale_y}')
     
     # == Zero point offset ==
     # See "zeroes thereof" in quantization notes
@@ -295,7 +294,6 @@ def from_QLinearMatMul(onnx_model,onnx_node):
     assert zp_w.any() == False
     scaler_offset = zp_y - scale*(matrix.sum(axis=0) * zp_x)
     # scaler_offset = np.array(0) 
-    print(f'scaler_offset: {scaler_offset}')
 
     output_nodes = [
         gemm_node(inputs,scaler_input,matrix,biases),
@@ -330,13 +328,13 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1])).astype(float)
     scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4])).astype(float)
     scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6])).astype(float)
-    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2])).astype(float)
-    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5])).astype(float)
-    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7])).astype(float)
+    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2])).astype(int)
+    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5])).astype(int)
+    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7])).astype(int)
 
     # Matrix Parameters
-    kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3])).astype(float)
-    biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(float)
+    kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3])).astype(int)
+    biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(int)
 
     strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
     group = get_attribute_by_name('group',onnx_node.attribute).i
@@ -355,8 +353,10 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     wadds = zp_x * kernel.sum(axis=(1,2,3)) # ZX*SUM(W) 
     # gadds is always 0 if zp_w is 0
     # gadds = kernel.shape[-1]*kernel.shape[-2]*zp_x*zp_w # general adds, as in N*Z1*Z2
+    
+    biases = biases - wadds
 
-    scaler_offset = zp_y + scale * (-wadds)
+    scaler_offset = zp_y #+ scale * (-wadds)
     # scaler_offset = np.array(0)
  
     if group == 1:
@@ -511,7 +511,7 @@ class output_scale_node(Node):
         self.scale_precision = scale_precision
 
     def forward(self,input:np.array):
-        input_squeezed = np.array(input).squeeze().astype(float)
+        input_squeezed = np.array(input).squeeze().astype(int)
         # black magic needed to force fp_m multiplication to broadcast along the first dimension of out (C)
 
         fp_m = self.real_scale
@@ -617,7 +617,7 @@ class conv_node(Node):
         flat_input = toeplitzize_input(input,ksize=self.kernel.shape[-1],strides=self.strides,channel_minor=self.channel_minor, zero_point=self.zero_point)
         # print(flat_input.shape)
 
-        flat_out = flat_input.astype(float) @ self.matrix.astype(float)
+        flat_out = flat_input @ self.matrix
         for row in flat_out:
             row+=self.biases
             
@@ -700,7 +700,7 @@ class cat_node(Node):
         if self.axis is None:
             inputs = np.array(inputs)
             return inputs
-        return np.concatenate(inputs,axis=self.axis).astype(float)
+        return np.concatenate(inputs,axis=self.axis)
     
 class global_avg_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str]):
@@ -774,7 +774,7 @@ class gemm_node(Node):
         input: vector
         '''
         input = np.array(input).squeeze(axis=0)
-        out = (input.astype(float) @ self.matrix.astype(float)) + self.biases.astype(float)
+        out = (input @ self.matrix) + self.biases
 
         return out
     
