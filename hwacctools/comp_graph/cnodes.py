@@ -516,12 +516,13 @@ class output_scale_node(Node):
 
         fp_m = self.real_scale
         fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input_squeezed.shape)-1)))
-        out = np.round(input_squeezed * fp_m)
+        out = input_squeezed * fp_m
         if self.offset.ndim == 0:
             offset_broadcast = self.offset
         else:
             offset_broadcast = self.offset[:,*[np.newaxis]*len(input_squeezed.shape[1:])]
         out = out + offset_broadcast
+        out = out.round()
         out = q.saturating_clip(out, self.out_precision, signed=False)
         out = out.reshape(1,*out.shape)
         return out
