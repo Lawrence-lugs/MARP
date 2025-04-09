@@ -325,16 +325,16 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     outputs = onnx_node.output
 
     # Quantization-related parameters
-    scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1])).astype(float)
-    scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4])).astype(float)
-    scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6])).astype(float)
-    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2])).astype(int)
-    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5])).astype(int)
-    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7])).astype(int)
+    scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1])).astype(np.float32)
+    scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4])).astype(np.float32)
+    scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6])).astype(np.float32)
+    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2])).astype(np.int32)
+    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5])).astype(np.int32)
+    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7])).astype(np.int32)
 
     # Matrix Parameters
-    kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3])).astype(int)
-    biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(int)
+    kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3])).astype(np.int32)
+    biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(np.int32)
 
     strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
     group = get_attribute_by_name('group',onnx_node.attribute).i
@@ -353,7 +353,7 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     wadds = zp_x * kernel.sum(axis=(1,2,3)) # ZX*SUM(W) 
     # gadds is always 0 if zp_w is 0
     # gadds = kernel.shape[-1]*kernel.shape[-2]*zp_x*zp_w # general adds, as in N*Z1*Z2
-    
+
     biases = biases - wadds
 
     scaler_offset = zp_y #+ scale * (-wadds)
@@ -483,7 +483,7 @@ class quantized_linear_add_node(Node):
         return quantized_linear_add_node(inputs,outputs,scale_x,scale_y,zp_x,zp_y,scale_out,zp_out,other_initializer)
 
 class output_scale_node(Node):
-    def __init__(self, inputs, outputs, scale, offset, scale_precision = 16, out_precision=8):
+    def __init__(self, inputs, outputs, scale, offset, scale_precision = 32, out_precision=8):
         '''
         Output scaling per TFLite quantization
 
@@ -511,10 +511,10 @@ class output_scale_node(Node):
         self.scale_precision = scale_precision
 
     def forward(self,input:np.array):
-        input_squeezed = np.array(input).squeeze().astype(int)
+        input_squeezed = np.array(input).squeeze()
         # black magic needed to force fp_m multiplication to broadcast along the first dimension of out (C)
 
-        fp_m = self.real_scale
+        fp_m = self.fp_m
         fp_m = fp_m.reshape(fp_m.shape[0],*([1]*(len(input_squeezed.shape)-1)))
         out = input_squeezed * fp_m
         if self.offset.ndim == 0:
@@ -523,6 +523,7 @@ class output_scale_node(Node):
             offset_broadcast = self.offset[:,*[np.newaxis]*len(input_squeezed.shape[1:])]
         out = out + offset_broadcast
         out = out.round()
+
         out = q.saturating_clip(out, self.out_precision, signed=False)
         out = out.reshape(1,*out.shape)
         return out

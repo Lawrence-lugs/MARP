@@ -27,10 +27,10 @@ def toeplitzize_input(in_tensor,ksize=3,strides=1,channel_minor = False, zero_po
     if ksize == 3:
         tensor2 = np.pad(tensor,((1,1),(1,1),(0,0)), 
                          mode='constant', constant_values=zero_point)
-        out = np.empty((H*W,C*9))
+        out = np.empty((H*W,C*9), dtype=tensor.dtype)
     else:
         tensor2 = tensor
-        out = np.empty((H*W,C))
+        out = np.empty((H*W,C), dtype=tensor.dtype)
     for r in range(H):
         for c in range(W):
             recfield = get_recfield_for_pixel(strides*r,strides*c,tensor2,ksize)
