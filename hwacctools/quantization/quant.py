@@ -8,32 +8,28 @@ import pandas as pd
 df = pd.DataFrame
 
 class QuantizedTensor:
-    '''
-    Parameters:
-    shape : tuple -- Shape of the tensor
-    precision : int -- Number of bits to quantize to
-    mode : str -- Quantization mode, 'symmetric', 'maxmin' or '3sigma'
-    real_values : np.ndarray -- Real values of the tensor
-    quantized_values : np.ndarray -- Quantized values of the tensor
-    scale : float -- Scale of the quantization
-    zero_point : float -- Zero point of the quantization
-    
-    Main attributes:
-    real_values : np.ndarray -- Real values of the tensor
-    quantized_values : np.ndarray -- Quantized values of the tensor
-    scale : float -- Scale of the quantization
-    zero_point : float -- Zero point of the quantization
-    shape : tuple -- Shape of the tensor
-    fake_quantized_values : np.ndarray -- Quantized values translated back to real range
-    
-    Quantized Tensor
-    Reals are normalized to [-1,1]
-    If mode is 'symmetric', zero point is 0 and scale is 2 / (2**precision - 1)
-    
-    '''
-
     def __init__(self,shape=None,precision=None,mode='symmetric',real_values=None,quantized_values=None,scale=None,zero_point=None):
         '''
+        Quantized Tensor
+        Reals are normalized to [-1,1]
+        If mode is 'symmetric', zero point is 0 and scale is 2 / (2**precision - 1)
+
+        Parameters:
+        shape : tuple -- Shape of the tensor
+        precision : int -- Number of bits to quantize to
+        mode : str -- Quantization mode, 'symmetric', 'maxmin' or '3sigma'
+        real_values : np.ndarray -- Real values of the tensor
+        quantized_values : np.ndarray -- Quantized values of the tensor
+        scale : float -- Scale of the quantization
+        zero_point : float -- Zero point of the quantization
+        
+        Main attributes:
+        real_values : np.ndarray -- Real values of the tensor
+        quantized_values : np.ndarray -- Quantized values of the tensor
+        scale : float -- Scale of the quantization
+        zero_point : float -- Zero point of the quantization
+        shape : tuple -- Shape of the tensor
+        fake_quantized_values : np.ndarray -- Quantized values translated back to real range
         '''
         if real_values is not None:
             if precision is None:

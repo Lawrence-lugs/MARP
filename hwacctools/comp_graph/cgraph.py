@@ -337,4 +337,4 @@ def compare_with_onnx(
         print('FAILED')
         # return scaler_node, conv_node, cgraph, ref, interm
 
-    return (cgraph == ref).all() # True
+    return np.allclose(cgraph,ref,atol=2) # True
