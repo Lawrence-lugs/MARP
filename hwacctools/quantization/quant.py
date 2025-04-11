@@ -7,7 +7,7 @@ from scipy.signal import convolve2d
 import pandas as pd
 df = pd.DataFrame
 
-class quantized_tensor:
+class QuantizedTensor:
     '''
     Parameters:
     shape : tuple -- Shape of the tensor
@@ -94,7 +94,7 @@ def convolve_reals(a,w) -> np.ndarray:
     " o = aw "
     return convolve2d(a.real_values,w.real_values[::-1].T[::-1].T,mode='valid')
 
-def scaling_quantized_matmul(w,a,outBits,internalPrecision,out_scale = None) -> quantized_tensor:
+def scaling_quantized_matmul(w,a,outBits,internalPrecision,out_scale = None) -> QuantizedTensor:
     " o = w @ a.T but quantized "
 
     # Matrix multiplication
@@ -117,7 +117,7 @@ def scaling_quantized_matmul(w,a,outBits,internalPrecision,out_scale = None) -> 
     o_q = saturating_clip(scaled_clipped_shifted, outBits)
 
     # Quantized tensor of the output
-    o_qtensor = quantized_tensor(
+    o_qtensor = QuantizedTensor(
                     qaqw.shape,
                     outBits,
                     quantized_values=o_q,
@@ -127,7 +127,7 @@ def scaling_quantized_matmul(w,a,outBits,internalPrecision,out_scale = None) -> 
 
     return o_qtensor
 
-def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = None) -> quantized_tensor:
+def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = None) -> QuantizedTensor:
     " o = a * w but quantized "
 
     # Convolution
@@ -149,7 +149,7 @@ def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = Non
     o_q = saturating_clip(o_q, outBits)
 
     # Quantized tensor of the output
-    o_qtensor = quantized_tensor(
+    o_qtensor = QuantizedTensor(
                     qaqw.shape,
                     outBits,
                     quantized_values=o_q,
