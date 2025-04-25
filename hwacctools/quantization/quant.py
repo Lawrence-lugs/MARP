@@ -67,10 +67,10 @@ class QuantizedTensor:
             mean = self.real_values.mean()
             std = self.real_values.std()
             self.scale = std*3 / (2**precision - 1)
-            self.zero_point = mean
+            self.zero_point = 2**(precision - 1) - 1
         elif mode == 'symmetric':
             self.scale = 2 / (2**precision - 1)
-            self.zero_point = 0
+            self.zero_point = 0    
 
         # r = S(q - Z)
         self.quantized_values = np.round( (self.real_values / self.scale) + self.zero_point ).astype(int)
