@@ -349,7 +349,7 @@ def from_QLinearMatMul(onnx_model,onnx_node):
 
     return output_nodes
 
-def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
+def from_QLinearConv(onnx_model,onnx_node,channel_minor=False, qparams=None):
     '''
     Creates a set of nodes equivalent to an ONNX QLinearConv
     
@@ -364,6 +364,9 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     7. output_zero_point
     8. bias
     '''
+    if onnx_model is None and qparams is None:
+        raise ValueError('No model or quantization parameters provided')
+
     if onnx_node.op_type != 'QLinearConv':
         raise TypeError('Input node is not a QLinearConv node')
 
@@ -372,19 +375,31 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False):
     outputs = onnx_node.output
 
     # Quantization-related parameters
-    scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1])).astype(np.float32)
-    scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4])).astype(np.float32)
-    scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6])).astype(np.float32)
-    zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2])).astype(np.int32)
-    zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5])).astype(np.int32)
-    zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7])).astype(np.int32)
+    if onnx_model is None:
+        # If no model is provided, we assume the quantization parameters are passed
+        # as a dictionary
+        scale_x = qparams['scale_x']
+        scale_w = qparams['scale_w']
+        scale_y = qparams['scale_y']
+        zp_x = qparams['zp_x']
+        zp_w = qparams['zp_w']
+        zp_y = qparams['zp_y']
+        kernel = qparams['kernel']
+        biases = qparams['biases']
+        strides = qparams['strides']
+        group = qparams['group']
+    else:
+        scale_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1])).astype(np.float32)
+        scale_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[4])).astype(np.float32)
+        scale_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[6])).astype(np.float32)
+        zp_x = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2])).astype(np.int32)
+        zp_w = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[5])).astype(np.int32)
+        zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7])).astype(np.int32)
 
-    # Matrix Parameters
-    kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3])).astype(np.int32)
-    biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(np.int32)
-
-    strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
-    group = get_attribute_by_name('group',onnx_node.attribute).i
+        kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3])).astype(np.int32)
+        biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(np.int32)
+        strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
+        group = get_attribute_by_name('group',onnx_node.attribute).i
 
     # == M Scaling ==
     # See "tflite quantized matmul" in quantization notes
