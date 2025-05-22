@@ -3,7 +3,7 @@ import numpy as np
 from torchvision import transforms
 from PIL import Image
 import onnx
-from onnx import helper
+from onnx import helper, numpy_helper
 from typing import Sequence, Any
 import onnxruntime
 from onnx.onnx_pb import (
@@ -32,7 +32,7 @@ def get_intermediate_tensor_value(modelpath, tensor_name, input_array = None, in
     if type(modelpath) == str:
         model = onnx.load(modelpath)
     else :
-        model = modelpath.SerializeToString()
+        model = modelpath
     
     model = add_tensor_to_model_outputs(model, tensor_name)
     
@@ -174,3 +174,52 @@ def infer_node_output(
     results = sess.run(None, feeds)
     return results
     
+
+def is_initializer(onnx_model,name):
+    for init in onnx_model.graph.initializer:
+        if init.name == name:
+            return 'initializer'
+    return False
+
+def get_initializer_by_name(onnx_model,name):
+    for init in onnx_model.graph.initializer:
+        if init.name == name:
+            return init
+    raise LookupError(f'Could not find initializer with name {name}')
+
+def get_node_by_output(onnx_model,output_name):
+    for node in onnx_model.graph.node:
+        if node.output[0] == output_name:
+            return node
+    raise LookupError(f'Could not find node with output {output_name}')
+
+def get_attribute_by_name(name:str,attr_list:list):
+    for i,attr in enumerate(attr_list):
+        if attr.name == name:
+            return attr
+    raise AttributeError
+
+
+def delete_initializer_by_name(model, initializer_name):
+    for i, init in enumerate(model.graph.initializer):
+        if init.name == initializer_name:
+            del model.graph.initializer[i]
+            break
+
+def randomize_initializer_to_binary(model, initializer_name):
+    array = numpy_helper.to_array(get_initializer_by_name(model, initializer_name))
+    new_value = np.random.randint(0, 2, size=array.shape).astype(array.dtype)
+    tensor = numpy_helper.from_array(new_value, name=initializer_name)
+    delete_initializer_by_name(model, initializer_name)
+    model.graph.initializer.append(tensor)
+
+def randomize_model_to_binary_weights(model):
+    for i,node in enumerate(model.graph.node):
+        if node.op_type == "QLinearConv":
+            group = get_attribute_by_name('group', node.attribute).i
+            if(group == 1):
+                inii = node.input[3]
+                randomize_initializer_to_binary(model, inii)
+            # else:
+                # print(i,node.name)
+    return model

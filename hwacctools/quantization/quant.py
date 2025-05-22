@@ -42,7 +42,12 @@ class QuantizedTensor:
                 raise ValueError('Scale and zero point must be provided')
             self.real_values = None
             self.quantized_values = quantized_values
-            self.scale = scale
+            
+            if type(scale) != np.ndarray:
+                self.scale = np.array([scale])
+            else:
+                self.scale = scale
+
             self.zero_point = zero_point
             self.dequantize()
         else:
@@ -72,12 +77,13 @@ class QuantizedTensor:
             self.scale = 2 / (2**precision - 1)
             self.zero_point = 0    
 
-        # r = S(q - Z)
+        self.scale = np.array([self.scale]) 
         self.quantized_values = np.round( (self.real_values / self.scale) + self.zero_point ).astype(int)
 
     def dequantize(self):
         " Creates fake quantization values from the quantized values, like EdMIPS "
-        self.fake_quantized_values = (self.quantized_values - self.zero_point) * self.scale
+        fp_m = self.scale.reshape(self.scale.shape[0],*([1]*(len(self.quantized_values.shape)-1)))
+        self.fake_quantized_values = (self.quantized_values - self.zero_point) * fp_m
         if self.real_values is None:
             self.real_values = self.fake_quantized_values
         return
@@ -158,9 +164,13 @@ def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = Non
 def convert_scale_to_shift_and_m0(scale,precision=16):
     " Convert scale(s) to shift and zero point "
 
+    if scale == 0:
+        return 0, 0
+
     shift = int(np.ceil(np.log2(scale)))
     # shift = np.abs(shift)
     m0 = scale / 2**shift
+
     fp_string = convert_to_fixed_point(m0,precision)
     m0_clipped = fixed_point_to_float(fp_string,precision)
     return m0_clipped, shift
@@ -168,27 +178,29 @@ def convert_scale_to_shift_and_m0(scale,precision=16):
 vconvert_scale_to_shift_and_m0 = np.vectorize(convert_scale_to_shift_and_m0)
 
 def convert_to_fixed_point(number,precision):
-    " Convert a float [0,1] to fixed point binary string"
-    out = ''
-    for i in range(precision):
-        number *= 2
-        integer = int(number)
-        number -= integer
-        out += str(integer)
-    return out
+    " Convert a float (0,1) to fixed point binary string"
+    if number == 1:
+        number = 0.9999999999999999
+    x = number*(2**precision)
+    x = np.floor(x).astype(int)
+    return np.binary_repr(x,width=precision)
 
 def convert_to_fixed_point_int(number,precision):
     " Convert a float [0,1] to fixed point binary "
-    return int(convert_to_fixed_point(number,precision),base=2)
+    x = number*(2**precision)
+    x = np.floor(x).astype(int)
+    return x
 
 vconvert_to_fixed_point_int = np.vectorize(convert_to_fixed_point_int)
 
 def fixed_point_to_float(number,precision):
-    " Convert a fixed point binary to float [0,1] "
-    out = 0
-    for i in range(precision):
-        out += int(number[i]) * 2**-(i+1)
-    return out
+    " Convert a fixed point binary string to float [0,1] "
+    # out = 0
+    # for i in range(precision):
+    #     out += int(number[i]) * 2**-(i+1)
+    if len(number) != precision:
+        raise ValueError('Number must be of length {}'.format(precision))
+    return int(number,2)*(2.**-(precision))
 
 def _right_shift(number,shift):
     " Right shift a number. Shifting rounds toward -infty"

@@ -4,30 +4,7 @@ import numpy as np
 from .compute import *
 from ..quantization import quant as q
 from joblib import Memory
-
-def is_initializer(onnx_model,name):
-    for init in onnx_model.graph.initializer:
-        if init.name == name:
-            return 'initializer'
-    return False
-
-def get_initializer_by_name(onnx_model,name):
-    for init in onnx_model.graph.initializer:
-        if init.name == name:
-            return init
-    raise LookupError(f'Could not find initializer with name {name}')
-
-def get_node_by_output(onnx_model,output_name):
-    for node in onnx_model.graph.node:
-        if node.output[0] == output_name:
-            return node
-    raise LookupError(f'Could not find node with output {output_name}')
-
-def get_attribute_by_name(name:str,attr_list:list):
-    for i,attr in enumerate(attr_list):
-        if attr.name == name:
-            return attr
-    raise AttributeError
+from ..onnx_utils import *
 
 def get_cnode_from_onnx_node(node,nx_model, **kwargs):
     if node.op_type == 'Conv':
