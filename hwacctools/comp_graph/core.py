@@ -1,6 +1,7 @@
 from . import splitter,cnodes,cgraph
 import rectpack
 import numpy as np
+import onnx
 
 def get_ids_for_shapelist(shapelist):
     outlist = []
@@ -29,7 +30,6 @@ def pack_matrices(cgraph,imc_core_size,packer):
     packer.add_bin(*imc_core_size,count=float("inf"))
     packer.pack()
     return cgraph,imc_core_size,packer
-
 class packed_model(object):
     '''
     Runs bin packing on a cgraph
@@ -85,6 +85,7 @@ class packed_model(object):
         self.nbins = len(packer)
         self.cgraph_shapes = cgraph_shapes
 
+        self.bin_matrices = []
         for bin in packer:
 
             # Prepare matrix for a new core
@@ -101,11 +102,25 @@ class packed_model(object):
 
                 cell_array[y1:y2,x1:x2] = mapped_node.matrix
 
+            self.bin_matrices.append(cell_array)
+
         self.packer = packer
         self.cgraph = inshapes
 
         return 
     
+    @classmethod
+    def from_onnx_model(cls,
+                 nx_model : onnx.ModelProto,
+                 imc_core_size : tuple[int],
+                 infer = False
+                 ):
+        '''
+        Loads a model from onnx and packs it into imc_core_size sized matrices
+        '''
+        cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model, channel_minor=True)
+        return cls(cgraph_UUT,imc_core_size,infer=infer)
+
 class accelerator(object):
     '''
     Forward-pass simulation on specific simulation parameters
