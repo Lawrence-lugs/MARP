@@ -59,26 +59,44 @@ class QuantizedTensor:
         self.shape = self.real_values.shape
         return
 
-    def quantize(self, precision, mode='symmetric', zero_point = None):
+    def quantize(self, precision, mode='symmetric', zero_point = None, signed=True):
         if mode == 'maxmin' : 
             clip_high = self.real_values.max()
             clip_low = self.real_values.min()
+            # self.scale = 2*max(clip_high,clip_low) / (2**precision - 1)
             self.scale = 2*max(clip_high,clip_low) / (2**precision - 1)
             if zero_point is None:
-                self.zero_point = self.real_values.mean()
+                if not signed: 
+                    self.zero_point = 2 ** (precision - 1) - 1
+                self.zero_point = 0
             else:
                 self.zero_point = zero_point
         elif mode == '3sigma' :
             mean = self.real_values.mean()
             std = self.real_values.std()
             self.scale = std*3 / (2**precision - 1)
-            self.zero_point = 2**(precision - 1) - 1
+            if zero_point is None:
+                if not signed: 
+                    self.zero_point = 2 ** (precision - 1) - 1
+                self.zero_point = mean / self.scale
+            else:
+                self.zero_point = zero_point
         elif mode == 'symmetric':
             self.scale = 2 / (2**precision - 1)
             self.zero_point = 0    
 
         self.scale = np.array([self.scale]) 
+
+        # Clipping
+        if signed:
+            clip_high = 2 ** (precision - 1) - 1
+            clip_low = -2 ** (precision - 1)
+        else:
+            clip_high = 2 ** precision - 1
+            clip_low = 0
+
         self.quantized_values = np.round( (self.real_values / self.scale) + self.zero_point ).astype(int)
+        self.quantized_values = np.clip(self.quantized_values, clip_low, clip_high)
 
     def dequantize(self):
         " Creates fake quantization values from the quantized values, like EdMIPS "
@@ -86,7 +104,10 @@ class QuantizedTensor:
         self.fake_quantized_values = (self.quantized_values - self.zero_point) * fp_m
         if self.real_values is None:
             self.real_values = self.fake_quantized_values
-        return
+        return self.fake_quantized_values
+
+    def __repr__(self):
+        return self.quantized_values.__repr__()
 
 def convolve_fake_quantized(a,w) -> np.ndarray:
     " o = aw "
