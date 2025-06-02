@@ -1,7 +1,9 @@
-from . import splitter,cnodes,cgraph
-import rectpack
+from . import splitter,cnodes,cgraph, packer_utils  as pu
 import numpy as np
 import onnx
+import matplotlib.pyplot as plt
+import rectpack
+import seaborn as sns
 
 def get_ids_for_shapelist(shapelist):
     outlist = []
@@ -30,6 +32,7 @@ def pack_matrices(cgraph,imc_core_size,packer):
     packer.add_bin(*imc_core_size,count=float("inf"))
     packer.pack()
     return cgraph,imc_core_size,packer
+
 class packed_model(object):
     '''
     Runs bin packing on a cgraph
@@ -106,6 +109,7 @@ class packed_model(object):
 
         self.packer = packer
         self.cgraph = inshapes
+        self.core_size = imc_core_size
 
         return 
     
@@ -113,90 +117,139 @@ class packed_model(object):
     def from_onnx_model(cls,
                  nx_model : onnx.ModelProto,
                  imc_core_size : tuple[int],
-                 infer = False
+                 infer = False,
+                 packer = None,
+                 **kwargs
                  ):
         '''
         Loads a model from onnx and packs it into imc_core_size sized matrices
         '''
         cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model, channel_minor=True)
-        return cls(cgraph_UUT,imc_core_size,infer=infer)
+        return cls(cgraph_UUT,imc_core_size,infer=infer,packer=packer)
 
-class accelerator(object):
+    def plot(self, bin = None, filepath = None, name = None):
+        '''
+        Plots the packed model as a grid of rectangles
+        '''
+
+        pu.plot_packing_efficient(self.packer,filepath=filepath, name=name)
+
+        return
+
+    def find_bin_of_id(self, node_id):
+        '''
+        Finds the bin of a node ID
+        '''
+        for i,bin in enumerate(self.packer):
+            for rect in bin:
+                if rect.rid == node_id:
+                    return i
+        return None
+
+class QRAccModel(object):
     '''
-    Forward-pass simulation on specific simulation parameters
+    Analytical model of a qracc accelerator
     '''
     def __init__(self,
-                 cgraph : cgraph.Cgraph,
-                 imc_core_size : tuple[int],
-                 num_imc_cores : int,
-                 rs_core_size : tuple[int],
-                 num_rs_cores : int
+                 packed_cgraph : packed_model,
+                 num_cores = 1
                  ):
         
-        self.original_cgraph = cgraph
-        self.imc_core_size = imc_core_size
-        self.num_imc_cores = num_imc_cores
-        self.rs_core_size = rs_core_size
-        self.num_rs_cores = num_rs_cores
-        self.packed_model = packed_model(cgraph,imc_core_size)
+        self.packed_cgraph = packed_cgraph
+        self.total_bins = len(packed_cgraph.packer)
+        self.calculate_utilization()
+        self.num_cores = num_cores
+        self.predict_weight_rewrites(num_cores)
+        self.core_size = packed_cgraph.core_size
         return
-    
+
+    def calculate_utilization(self):
+
+        total_matrix_area = 0
+        for bin in self.packed_cgraph.packer:
+            for rect in bin:
+                total_matrix_area += rect.width * rect.height
+
+        total_core_area = len(self.packed_cgraph.packer) * 256 * 256
+
+        self.utilization = total_matrix_area / total_core_area
+
+    def predict_weight_rewrites(self, num_cores=1): 
+        current_bins = {i:None for i in range(num_cores)}
+        bin_uses = {i:0 for i in range(num_cores)}
+        bin_writes = 1
+
+        # create dictionary of the bins in the packed model
+        times_written = {i:0 for i,bin in enumerate(self.packed_cgraph.packer)}
+
+        # create dictionary of write number vs bin ID written
+        write_list = {i+1:0 for i in range(len(self.packed_cgraph.packer))}
+
+        for matshape in self.packed_cgraph.cgraph_shapes:
+            # get the bin that this matshape is in
+            bin_id = self.packed_cgraph.find_bin_of_id(matshape[2])
+            if bin_id is None:
+                raise ValueError(f"Matshape {matshape} not found in packed model bins")
+
+            # print(f'accessing bin {bin_id}:{current_bins}, {bin_uses}')
+            
+            if bin_id not in current_bins.values():
+                lfu_bin = min(bin_uses, key=bin_uses.get)
+                current_bins[lfu_bin] = bin_id
+                # reset bin_uses of lfu_bin
+                bin_uses[lfu_bin] = 0
+                times_written[bin_id] += 1
+                bin_writes += 1
+                write_list[bin_writes] = bin_id
+            else:
+                # increment bin_uses of current_bins with value bin_id
+                for k, v in current_bins.items():
+                    if v == bin_id:
+                        bin_uses[k] += 1
+                        break
+
+        # print('Total bin writes:', bin_writes)
+        # print('Bin uses:', bin_uses)
+
+        self.weight_bin_writes = bin_writes
+        self.weight_times_written = times_written
+        self.weight_write_list = write_list
+
+        return bin_writes
+
+    def plot_bin_writes_bargraph(self, filepath=None, name=None, ax=None):
+        times_written = self.weight_times_written
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=[3, 2], dpi=300)
+        
+        sns.barplot(x=list(times_written.keys()), y=list(times_written.values()), ax=ax)
+
+        # Label only every N ticks based on figure size
+        num_bins = len(times_written)
+        if num_bins > 10:
+            step = num_bins // 5  # Show ~5 ticks
+            ax.set_xticks(ax.get_xticks()[::step])
+
+        ax.set_xlabel("Bin ID")
+        ax.set_ylabel("$N_{writes}$")
+        ax.set_title(f"{name}")
+        
+        return ax
+
+    def plot_write_lineplot(self, filepath=None, name=None, ax=None):
+        write_list = self.weight_write_list
+        if ax is None:
+            fig, ax = plt.subplots(figsize=[3, 2], dpi=300)
+        sns.lineplot(x=list(write_list.keys()), y=list(write_list.values()), 
+                    marker='o', markersize=4, color='blue', linewidth=0.5, ax=ax)
+
+        # sns.jointplot(x=list(write_list.keys()), y=list(write_list.values()),
+        #                kind="scatter", ax=ax, color='blue', marker='o', s=20)
+        ax.set_xlabel("Write ID") 
+        ax.set_ylabel("Bin ID")
+        ax.set_title(f"{name}")
+        return ax
+
     def simulate_inference(self):
-
-        imc_core_loads = np.zeros(self.num_imc_cores)
-        rs_core_loads = np.zeros(self.num_rs_cores)
-
-        # Let's put this on hold for now, because I don't know how to map depthwise to the RS core yet!        
-
         return
-
-class row_stationary_core(object):
-    '''
-    Row stationary accelerator model
-
-    TODO: Model properly based on dimension
-    '''
-    def __init__(self,
-                 kernel,
-                 pe_array_size : tuple[int]
-                 ):
-        self.kernel = kernel
-        return
-
-    def __call__(self, input_matrix : np.ndarray):
-        '''
-        Parameters
-        ----------
-        input_matrix : np.ndarray,
-            input matrix to be convolved
-        '''
-        return
-
-class imc_accelerator_core(object):
-    '''
-    Contains operations performable by a single accelerator core
-    '''
-    def __init__(self,
-                 imc_core_size : tuple[int],
-                 matrix : np.ndarray
-                 ):
-        '''
-        Parameters
-        ----------
-        imc_core_size : tuple(int,int),
-            dimensions of bitcell array
-        matrix : np.ndarray,
-            weights loaded into bitcell array
-        '''
-        self.matrix = matrix
-        self.imc_core_size = imc_core_size
-        return
-    
-    def load_matrix(self,matrix):
-        '''
-        Loads a matrix into the core
-        '''
-        self.matrix = matrix
-        self.loads += 1
-        return
-    

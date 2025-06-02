@@ -7,6 +7,61 @@ import os
 from tqdm import tqdm
 from PIL import Image
 
+def plot_packing_efficient(packer, tile_count_h = 6, filepath=None, name = None, **kwargs):
+    '''
+    Plots the packed bins in a grid layout with pastel colors.
+    '''
+    pastel_colors = [
+        "#FFB3BA", "#FFDFBA", "#FFFFBA", "#BAFFC9", "#BAE1FF",
+        "#FFABAB", "#FFC3A0", "#D5AAFF", "#C2F0C2", "#B2B2B2"
+    ]
+
+    n_subplot_cols = tile_count_h
+    n_subplot_rows = (len(packer) + n_subplot_cols - 1) // n_subplot_cols
+
+    fig, axs = plt.subplots(n_subplot_cols, n_subplot_rows, figsize=(9, 9))
+    for index,abin in enumerate(packer):
+        # print each rectangle inside packed bin in a plot
+        
+        plt.subplot(n_subplot_cols,n_subplot_rows, index + 1)
+
+        for i_rect,rect in enumerate(abin):
+            x, y, w, h = rect.x, rect.y, rect.width, rect.height
+            # print(i_rect % len(pastel_colors))
+            plt.gca().add_patch(plt.Rectangle((x, y), w, h, facecolor=pastel_colors[i_rect % len(pastel_colors)],edgecolor='#000000', linewidth=2))
+            plt.xlim(0, abin.width)
+            plt.ylim(0, abin.height)
+            
+        # add title with bin index
+        plt.title(f"{index + 1}", fontsize=10)
+
+    # plt.tight_layout()
+    # add overall title
+    if name is not None:
+        plt.suptitle(f"{name}", fontsize=16, y=0.95)
+
+    # turn off axis ticks for all subplots
+    for ax in axs.flat:
+        ax.set_aspect('equal', adjustable='box')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        # ax.axis('off')
+
+    # Add legend of pastel colors by index order
+    if kwargs.get('legend', False):
+        handles = [plt.Rectangle((0, 0), 1, 1, color=color) for color in pastel_colors]
+        labels = [f"{i}" for i in range(len(pastel_colors))]
+        plt.figlegend(handles, labels, loc='upper right', fontsize='medium', title='Packing order')
+    
+
+    if filepath is not None:
+        plt.savefig(filepath, bbox_inches='tight', dpi=300)
+    else:
+        plt.show()
+
+    return 
+
+
 def plot_bins(packer,
                  dir : str
                  ):
