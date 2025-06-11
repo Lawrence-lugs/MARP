@@ -76,9 +76,9 @@ class QuantizedTensor:
             std = self.real_values.std()
             self.scale = std*3 / (2**precision - 1)
             if zero_point is None:
-                if not signed: 
-                    self.zero_point = 2 ** (precision - 1) - 1
-                self.zero_point = mean / self.scale
+                # if not signed: 
+                self.zero_point = 2 ** (precision - 1) - 1
+                # self.zero_point = mean / self.scale
             else:
                 self.zero_point = zero_point
         elif mode == 'symmetric':
@@ -96,7 +96,7 @@ class QuantizedTensor:
             clip_low = 0
 
         self.quantized_values = np.round( (self.real_values / self.scale) + self.zero_point ).astype(int)
-        self.quantized_values = np.clip(self.quantized_values, clip_low, clip_high)
+        # self.quantized_values = np.clip(self.quantized_values, clip_low, clip_high)
 
     def dequantize(self):
         " Creates fake quantization values from the quantized values, like EdMIPS "
