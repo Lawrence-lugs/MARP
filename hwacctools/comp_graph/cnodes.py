@@ -406,8 +406,12 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False, qparams=None):
         ]
     else:
         # Depthwise convolution
-        nodes, concatenator = generate_depthwise_nodes(inputs,scaler_input,kernel,biases,strides, zero_point=zp_x)
-        output_nodes = nodes + [concatenator,output_scale_node(scaler_input,outputs,scale=scale,offset=scaler_offset)]
+        # nodes, concatenator = generate_depthwise_nodes(inputs,scaler_input,kernel,biases,strides, zero_point=zp_x)
+        # output_nodes = nodes + [concatenator,output_scale_node(scaler_input,outputs,scale=scale,offset=scaler_offset)]
+        output_nodes = [
+            dwc_node(inputs,scaler_input,kernel,biases,strides=strides,channel_minor=channel_minor,zero_point=zp_x),
+            output_scale_node(scaler_input,outputs,scale,offset=scaler_offset)
+        ]
 
     return output_nodes
 
@@ -565,6 +569,79 @@ class output_scale_node(Node):
 
         out = q.saturating_clip(out, self.out_precision, signed=False)
         out = out.reshape(1,*out.shape)
+        return out
+    
+class dwc_node(Node):
+    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, strides = 1, channel_minor = False, zero_point = 0):
+        '''
+        Depthwise convolution node not made of separate matmuls with concatenates.
+        Models ideally created DWC hardware.
+        '''
+        super(dwc_node,self).__init__(inputs,outputs)
+        self.kernel = kernel
+
+        assert kernel.shape[1] == 1, 'Depthwise convolution kernel must have a single input channel'
+
+        self.biases = biases
+
+        if channel_minor:
+            self.matrix = kernel.transpose(0,2,3,1).reshape(kernel.shape[0],-1).T
+        else:
+            self.matrix = kernel.reshape(kernel.shape[0],-1).T
+        
+        self.strides = strides
+        self.channel_minor = channel_minor
+
+        # For integer-only convolutions
+        self.zero_point = zero_point
+
+    @classmethod
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'Conv':
+            raise TypeError('Input node is not a convolution')
+        if get_attribute_by_name('group',onnx_node.attribute).i == 1:
+            raise TypeError('Input convolution is not depthwise, use conv_node instead')
+
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+
+        strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
+        
+        kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
+        biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
+
+        return dwc_node(inputs,outputs,kernel,biases,strides=strides)
+
+    def forward(self,input:np.array):
+        '''
+        Performs the node operation
+
+        input[0]: C,H,W tensor
+        '''
+        # Squeeze to remove batch dimension
+        input = np.array(input[0]).squeeze(axis=0)
+
+        flat_input = toeplitzize_input(input,ksize=self.kernel.shape[-1],strides=self.strides,channel_minor=self.channel_minor, zero_point=self.zero_point)
+        tplitz_windowed = flat_input.reshape(256, 9, -1).transpose(0, 2, 1)
+
+        nchannels = self.kernel.shape[0] # number of channels
+        npixels = flat_input.shape[0] # number of pixels
+        acc = np.empty((npixels, nchannels), dtype=np.int32)
+
+        a = self.kernel.reshape(-1,9)
+        for px in range(npixels): # for each pixel
+            for ch in range(nchannels): # for each channel
+                acc[px, ch] = np.sum(a[ch] * tplitz_windowed[px][ch])        
+
+        flat_out = acc+self.biases
+            
+        # output a C,H,W tensor
+        H = input.shape[1] // self.strides
+        C = flat_out.shape[1] 
+        W = input.shape[2] // self.strides
+
+        out = flat_out.T.reshape(1,C,H,W)
+        out = out.squeeze(axis=0)
         return out
 
 class conv_node(Node):
