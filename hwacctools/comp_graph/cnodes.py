@@ -945,6 +945,22 @@ class slicer_node(Node):
         self.row_lim = row_lim
         self.col_lim = col_lim
 
+    def from_onnx_node(self,onnx_model,onnx_node):
+        if onnx_node.op_type != 'Slice':
+            raise TypeError('Input node is not a slice node')
+
+        inputs = [onnx_node.input[0]]
+        outputs = onnx_node.output
+
+        # Get the slicing parameters
+        starts = get_attribute_by_name('starts',onnx_node.attribute).ints
+        ends = get_attribute_by_name('ends',onnx_node.attribute).ints
+
+        row_lim = [starts[0],ends[0]]
+        col_lim = [starts[1],ends[1]]
+
+        return slicer_node(inputs,outputs,row_lim=row_lim,col_lim=col_lim)
+
     def forward(self,input:np.array):
         input = np.array(input).squeeze(axis=0)
         if len(input.shape) == 1:
