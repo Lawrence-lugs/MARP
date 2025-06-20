@@ -583,11 +583,6 @@ class dwc_node(Node):
         assert kernel.shape[1] == 1, 'Depthwise convolution kernel must have a single input channel'
 
         self.biases = biases
-
-        if channel_minor:
-            self.matrix = kernel.transpose(0,2,3,1).reshape(kernel.shape[0],-1).T
-        else:
-            self.matrix = kernel.reshape(kernel.shape[0],-1).T
         
         self.strides = strides
         self.channel_minor = channel_minor
@@ -622,13 +617,16 @@ class dwc_node(Node):
         input = np.array(input[0]).squeeze(axis=0)
 
         flat_input = toeplitzize_input(input,ksize=self.kernel.shape[-1],strides=self.strides,channel_minor=self.channel_minor, zero_point=self.zero_point)
-        tplitz_windowed = flat_input.reshape(256, 9, -1).transpose(0, 2, 1)
 
         nchannels = self.kernel.shape[0] # number of channels
         npixels = flat_input.shape[0] # number of pixels
-        acc = np.empty((npixels, nchannels), dtype=np.int32)
+        n_window_pixels = self.kernel.shape[-1] * self.kernel.shape[-2] # number of pixels in the kernel window
 
-        a = self.kernel.reshape(-1,9)
+        tplitz_windowed = flat_input.reshape(npixels, n_window_pixels, -1).transpose(0, 2, 1)
+
+        acc = np.empty((npixels, nchannels), dtype=float)
+
+        a = self.kernel.reshape(-1,n_window_pixels)
         for px in range(npixels): # for each pixel
             for ch in range(nchannels): # for each channel
                 acc[px, ch] = np.sum(a[ch] * tplitz_windowed[px][ch])        
@@ -893,7 +891,7 @@ class gemm_node(Node):
         input = np.array(input).squeeze(axis=0)
         out = (input @ self.matrix) + self.biases
 
-        return out
+        return out.astype(input.dtype)
     
 class toeplitzizer_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], ksize:int, strides:int = 1):
@@ -915,6 +913,28 @@ class toeplitzizer_node(Node):
         out = toeplitzize_input(input,ksize=self.ksize,strides=self.strides)
         return out
     
+class channel_slicing_node(Node):
+    def __init__(self, inputs:list[str], outputs:list[str], channel_lim_low, channel_lim_high, channel_minor = False):
+        '''
+        A node that slices the ifmap into multiple ifmap sets of N channels
+        '''
+        super(channel_slicing_node,self).__init__(inputs,outputs)
+        self.channel_lim_low = channel_lim_low
+        self.channel_lim_high = channel_lim_high
+        self.channel_minor = channel_minor
+        
+    def forward(self,input:np.array):
+        input = np.array(input[0]).squeeze(axis=0)
+
+        input_cwh = input.transpose(2,0,1) if self.channel_minor else input
+
+        input_cwh_sliced = input_cwh[self.channel_lim_low:self.channel_lim_high,:,:]
+
+        if self.channel_minor:
+            input_cwh_sliced = input_cwh_sliced.transpose(1,2,0)
+
+        return input_cwh_sliced
+    
 class slicer_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], row_lim:list[int] = [None,None],col_lim:list[int] = [None,None]):
         '''
@@ -930,7 +950,7 @@ class slicer_node(Node):
         if len(input.shape) == 1:
             lim = self.col_lim if self.row_lim == [None,None] else self.row_lim
             return input[lim[0]:lim[1]]
-        return input[self.row_lim[0]:self.row_lim[1],self.col_lim[0]:self.col_lim[1]]
+        return input[self.row_lim[0]:self.row_lim[1],self.col_lim[0]:self.col_lim[1]].astype(input.dtype)
     
 class reshaper_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], channels:int):
