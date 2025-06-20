@@ -1,18 +1,12 @@
 import onnx
 from onnx import helper, numpy_helper, TensorProto
+import numpy as np
 
 def split_qlinearconv_node_per_channel(graph, node, C_max, prefix="split"):
     """
     Splits a QLinearConv node into multiple QLinearConv nodes with at most C_max input channels,
     then sums their outputs with QLinearAdd nodes. Handles per-channel quantization for weights.
-    
-    Args:
-        graph: The ONNX graph object.
-        node: The QLinearConv node to split.
-        C_max: Maximum number of input channels per split.
-        prefix: Prefix for new node names.
-    Returns:
-        List of new nodes (QLinearConv and QLinearAdd), new initializers, and final output name.
+    Adds Slice nodes to split the input tensor.
     """
     # Find weight, scale, and zero point initializers
     weight_name = node.input[3]
@@ -25,27 +19,47 @@ def split_qlinearconv_node_per_channel(graph, node, C_max, prefix="split"):
     W_scale = numpy_helper.to_array(weight_scale_init)
     W_zp = numpy_helper.to_array(weight_zp_init)
     C_in = W.shape[1]  # (out_channels, in_channels, kH, kW)
-    splits = []
     new_nodes = []
     new_inits = []
     out_names = []
 
-    for i in range(0, C_in, C_max):
-        c_start = i
-        c_end = min(i + C_max, C_in)
+    for i, c_start in enumerate(range(0, C_in, C_max)):
+        c_end = min(c_start + C_max, C_in)
+        print('Splitting QLinearConv node:', node.name, f'input channels {c_start} to {c_end}')
         # Slice weights
         W_split = W[:, c_start:c_end, :, :]
         w_split_name = f"{prefix}_w_{i}"
         w_split_init = numpy_helper.from_array(W_split, name=w_split_name)
         new_inits.append(w_split_init)
 
+        # Slice input tensor using Slice node
+        slice_out_name = f"{prefix}_slice_{i}"
+        starts_name = f"{prefix}_starts_{i}"
+        ends_name = f"{prefix}_ends_{i}"
+        axes_name = f"{prefix}_axes_{i}"
+        steps_name = f"{prefix}_steps_{i}"
+
+        starts_init = numpy_helper.from_array(np.array([c_start], dtype=np.int64), name=starts_name)
+        ends_init = numpy_helper.from_array(np.array([c_end], dtype=np.int64), name=ends_name)
+        axes_init = numpy_helper.from_array(np.array([1], dtype=np.int64), name=axes_name)
+        steps_init = numpy_helper.from_array(np.array([1], dtype=np.int64), name=steps_name)
+        new_inits.extend([starts_init, ends_init, axes_init, steps_init])
+
+        slice_node = helper.make_node(
+            "Slice",
+            inputs=[node.input[0], starts_name, ends_name, axes_name, steps_name],
+            outputs=[slice_out_name],
+            name=f"{prefix}_slice_{i}"
+        )
+        new_nodes.append(slice_node)
+
         # For per-channel quantization, weight scale and zp are per out_channel
         # So we use the same scale/zp for each split (no slicing needed)
-        # If per-channel quantization is on input channels, slice accordingly
 
         # Create new QLinearConv node
         inputs = list(node.input)
-        inputs[3] = w_split_name  # Replace weight input
+        inputs[0] = slice_out_name  # Use sliced input
+        inputs[3] = w_split_name    # Use sliced weights
         out_name = f"{prefix}_out_{i}"
         out_names.append(out_name)
         qconv_node = helper.make_node(
@@ -83,13 +97,6 @@ def replace_qlinearconv_with_split(graph, node, new_nodes, new_inits, final_outp
     """
     Replaces a QLinearConv node in the graph with a set of new nodes and initializers.
     The output of the last new node will be connected to the original node's output.
-
-    Args:
-        graph: The ONNX graph object.
-        node: The QLinearConv node to replace.
-        new_nodes: List of new nodes (QLinearConv and QLinearAdd).
-        new_inits: List of new initializers.
-        final_output: Name of the final output tensor from the split nodes.
     """
     # Remove the original node
     node_idx = None
@@ -124,14 +131,6 @@ def split_qlinearconv_node_per_output_channel(graph, node, K_max, prefix="split_
     """
     Splits a QLinearConv node into multiple QLinearConv nodes with at most K_max output channels,
     then concatenates their outputs to emulate the original node.
-
-    Args:
-        graph: The ONNX graph object.
-        node: The QLinearConv node to split.
-        K_max: Maximum number of output channels per split.
-        prefix: Prefix for new node names.
-    Returns:
-        List of new nodes (QLinearConv and Concat), new initializers, and final output name.
     """
     weight_name = node.input[3]
     weight_scale_name = node.input[4]
@@ -207,15 +206,6 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
     Splits a QLinearConv node into multiple QLinearConv nodes with at most K_max output channels
     and at most C_max input channels, using both output and input channel splitting.
     The outputs are summed and concatenated to emulate the original node.
-
-    Args:
-        graph: The ONNX graph object.
-        node: The QLinearConv node to split.
-        K_max: Maximum number of output channels per split.
-        C_max: Maximum number of input channels per split.
-        prefix: Prefix for new node names.
-    Returns:
-        List of new nodes, new initializers, and final output name.
     """
     weight_name = node.input[3]
     weight_init = next(i for i in graph.initializer if i.name == weight_name)
@@ -240,13 +230,7 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
 
     for k_idx, k_start in enumerate(range(0, K, K_max)):
         k_end = min(k_start + K_max, K)
-        # Slice node for output channels
-        # Create a temporary node with sliced weights and quant params for output channels
-        # Use split_qlinearconv_node_per_output_channel to get nodes for this output slice
-        # But we want to further split each output-sliced QLinearConv by input channels
-
         # Prepare a temporary node with output channel slice
-        # We'll need to slice weights, scales, and zero points for this output channel range
         weight_scale_name = node.input[4]
         weight_zp_name = node.input[5]
         weight_scale_init = next(i for i in graph.initializer if i.name == weight_scale_name)
@@ -282,19 +266,6 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
         temp_inputs[4] = w_scale_k_name
         temp_inputs[5] = w_zp_k_name
 
-        temp_node = helper.make_node(
-            "QLinearConv",
-            inputs=temp_inputs,
-            outputs=[f"{prefix}_tmp_out_{k_idx}"],
-            name=f"{prefix}_tmp_qconv_{k_idx}"
-        )
-
-        # Now split this temp node by input channels using split_qlinearconv_node_per_channel
-        # We need to update the weight initializer in the graph for this temp node
-        # But instead, we can pass the sliced weights and quant params directly to the splitting function
-        # So, we create a temporary graph with only this temp node and its inits
-        # Instead, let's call split_qlinearconv_node_per_channel logic directly here
-
         # --- Begin input channel splitting ---
         W_k_C = W_k
         C_in = W_k_C.shape[1]
@@ -309,13 +280,33 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
             w_split_init = numpy_helper.from_array(W_split, name=w_split_name)
             inits.append(w_split_init)
 
+            # Slice input tensor using Slice node
+            slice_out_name = f"{prefix}_slice_{k_idx}_{c_idx}"
+            starts_name = f"{prefix}_starts_{k_idx}_{c_idx}"
+            ends_name = f"{prefix}_ends_{k_idx}_{c_idx}"
+            axes_name = f"{prefix}_axes_{k_idx}_{c_idx}"
+            steps_name = f"{prefix}_steps_{k_idx}_{c_idx}"
+
+            starts_init = numpy_helper.from_array(np.array([c_start], dtype=np.int64), name=starts_name)
+            ends_init = numpy_helper.from_array(np.array([c_end], dtype=np.int64), name=ends_name)
+            axes_init = numpy_helper.from_array(np.array([1], dtype=np.int64), name=axes_name)
+            steps_init = numpy_helper.from_array(np.array([1], dtype=np.int64), name=steps_name)
+            inits.extend([starts_init, ends_init, axes_init, steps_init])
+
+            slice_node = helper.make_node(
+                "Slice",
+                inputs=[temp_inputs[0], starts_name, ends_name, axes_name, steps_name],
+                outputs=[slice_out_name],
+                name=f"{prefix}_slice_{k_idx}_{c_idx}"
+            )
+            nodes.append(slice_node)
+
             # Use the same per-output-channel quant params for each input split
-            # (per ONNX QLinearConv spec)
             out_name = f"{prefix}_out_{k_idx}_{c_idx}"
             out_names.append(out_name)
             qconv_inputs = list(temp_inputs)
+            qconv_inputs[0] = slice_out_name
             qconv_inputs[3] = w_split_name
-            # scale/zp already set in temp_inputs
 
             qconv_node = helper.make_node(
                 "QLinearConv",
@@ -366,12 +357,6 @@ def split_model_to_per_channel(graph, C_max=256, K_max=256, prefix="split"):
     """
     Applies the QLinearConv splitters to every QLinearConv node in the ONNX graph,
     limiting each to at most K_max output channels and C_max input channels.
-
-    Args:
-        graph: The ONNX graph object.
-        C_max: Maximum number of input channels per split.
-        K_max: Maximum number of output channels per split.
-        prefix: Prefix for new node names.
     """
     # Collect QLinearConv nodes first to avoid modifying the list while iterating
     qconv_nodes = [node for node in graph.node if node.op_type == "QLinearConv"]
