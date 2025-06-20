@@ -55,7 +55,7 @@ class Cgraph(object):
         '''
         node_list = []
         for node in nx_model.graph.node:
-            cnodes.get_cnode_from_onnx_node(node, nx_model)
+            cnodes.get_cnode_from_onnx_node(node, nx_model, channel_minor=True)
         return Cgraph(node_list,**kwargs)
 
     def check_if_node_done(self,node):
