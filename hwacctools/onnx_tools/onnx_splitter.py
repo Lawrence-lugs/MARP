@@ -521,11 +521,12 @@ def split_qlinearmatmul_node(graph, node, K_max=None, C_max=None, prefix="split_
 
     return new_nodes, new_inits, final_out
 
-def split_model_to_per_channel(graph, C_max=256, K_max=256, dwC_max=32, prefix="split"):
+def split_model_to_per_channel(graph, C_max=256, K_max=256, dwC_max=32, prefix="split", enforce_unroll=True):
     """
     Applies the QLinearConv splitters to every QLinearConv node in the ONNX graph,
     limiting each to at most K_max output channels (dwC_max for depthwise) and C_max input channels.
     Only splits nodes with group=1 or depthwise (group==C).
+    Can make sure unrolling the filter does not exceed C_max, for certain hardware constraints.
     """
     qconv_nodes = [node for node in graph.node if node.op_type == "QLinearConv"]
 
@@ -539,11 +540,15 @@ def split_model_to_per_channel(graph, C_max=256, K_max=256, dwC_max=32, prefix="
         C_in = W.shape[1]
         is_depthwise = (group != 1 and C_in == 1)
 
+        # Ensure unrolling the filter doesn't exceed C_max
+        kernel_shape = attr_dict.get('kernel_shape', [])
+        c_max = C_max // np.prod(kernel_shape) if enforce_unroll else C_max
+
         # Use dwC_max for depthwise convolutions, K_max otherwise
         k_max = dwC_max if is_depthwise else K_max
 
         new_nodes, new_inits, final_output = split_qlinearconv_node_per_output_and_input_channel(
-            graph, node, k_max, C_max, prefix=f"{prefix}_{idx}"
+            graph, node, k_max, c_max, prefix=f"{prefix}_{idx}"
         )
 
         if len(new_nodes) == 0:
