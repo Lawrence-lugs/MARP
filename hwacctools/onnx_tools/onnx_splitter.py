@@ -410,6 +410,117 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
 
     return all_nodes, all_inits, concat_out
 
+def split_qlinearmatmul_node(graph, node, K_max=None, C_max=None, prefix="split_matmul"):
+    """
+    Splits a QLinearMatMul node along the K (shared) and/or C (input) dimensions.
+    - K_max: max chunk size for the shared dimension (columns of A, rows of B)
+    - C_max: max chunk size for the input dimension (columns of B, output dimension)
+    """
+    # QLinearMatMul: [A, A_scale, A_zero, B, B_scale, B_zero, Y_scale, Y_zero]
+    A_name = node.input[0]
+    B_name = node.input[3]
+    B_init = next(i for i in graph.initializer if i.name == B_name)
+    B = numpy_helper.to_array(B_init)
+    # Assume B shape: (K, N) or (K,) for 1D
+    if B.ndim == 1:
+        B = B.reshape(-1, 1)
+    K_dim, N_dim = B.shape
+
+    new_nodes = []
+    new_inits = []
+    out_names = []
+
+    # Only split if K_max or C_max is set and less than the dimension
+    K_chunks = [(0, K_dim)] if not K_max or K_max >= K_dim else [
+        (k, min(k + K_max, K_dim)) for k in range(0, K_dim, K_max)
+    ]
+    C_chunks = [(0, N_dim)] if not C_max or C_max >= N_dim else [
+        (c, min(c + C_max, N_dim)) for c in range(0, N_dim, C_max)
+    ]
+
+    for c_idx, (c_start, c_end) in enumerate(C_chunks):
+        out_names_k = []
+        for k_idx, (k_start, k_end) in enumerate(K_chunks):
+            # Slice B
+            B_split = B[k_start:k_end, c_start:c_end]
+            b_split_name = f"{prefix}_b_{c_idx}_{k_idx}"
+            b_split_init = numpy_helper.from_array(B_split, name=b_split_name)
+            new_inits.append(b_split_init)
+
+            # Optionally, slice A if splitting K (columns)
+            if K_max and K_max < K_dim:
+                # Need to slice A's columns: shape (..., K)
+                slice_a_name = f"{prefix}_a_{c_idx}_{k_idx}"
+                starts_name = f"{prefix}_a_starts_{c_idx}_{k_idx}"
+                ends_name = f"{prefix}_a_ends_{c_idx}_{k_idx}"
+                axes_name = f"{prefix}_a_axes_{c_idx}_{k_idx}"
+                steps_name = f"{prefix}_a_steps_{c_idx}_{k_idx}"
+                starts_init = numpy_helper.from_array(np.array([k_start], dtype=np.int64), name=starts_name)
+                ends_init = numpy_helper.from_array(np.array([k_end], dtype=np.int64), name=ends_name)
+                axes_init = numpy_helper.from_array(np.array([-1], dtype=np.int64), name=axes_name)
+                steps_init = numpy_helper.from_array(np.array([1], dtype=np.int64), name=steps_name)
+                new_inits.extend([starts_init, ends_init, axes_init, steps_init])
+                slice_node = helper.make_node(
+                    "Slice",
+                    inputs=[node.input[0], starts_name, ends_name, axes_name, steps_name],
+                    outputs=[slice_a_name],
+                    name=f"{prefix}_a_slice_{c_idx}_{k_idx}"
+                )
+                new_nodes.append(slice_node)
+                a_input = slice_a_name
+            else:
+                a_input = node.input[0]
+
+            # Build QLinearMatMul node
+            inputs = list(node.input)
+            inputs[0] = a_input
+            inputs[3] = b_split_name
+            out_name = f"{prefix}_out_{c_idx}_{k_idx}"
+            out_names_k.append(out_name)
+            matmul_node = helper.make_node(
+                "QLinearMatMul",
+                inputs=inputs,
+                outputs=[out_name],
+                name=f"{prefix}_qmatmul_{c_idx}_{k_idx}"
+            )
+            new_nodes.append(matmul_node)
+
+        # If K was split, sum the outputs for this C chunk
+        sum_out = out_names_k[0]
+        for i in range(1, len(out_names_k)):
+            add_out = f"{prefix}_add_{c_idx}_{i}"
+            qadd_node = helper.make_node(
+                "QLinearAdd",
+                inputs=[
+                    sum_out, node.input[6], node.input[7],
+                    out_names_k[i], node.input[6], node.input[7],
+                    node.input[6], node.input[7],
+                ],
+                outputs=[add_out],
+                name=f"{prefix}_qadd_{c_idx}_{i}",
+                domain="com.microsoft"
+            )
+            new_nodes.append(qadd_node)
+            sum_out = add_out
+        out_names.append(sum_out)
+
+    # If C was split, concatenate the outputs along the last axis
+    if len(C_chunks) > 1:
+        concat_out = f"{prefix}_concat_out"
+        concat_node = helper.make_node(
+            "Concat",
+            inputs=out_names,
+            outputs=[concat_out],
+            name=f"{prefix}_concat",
+            axis=-1
+        )
+        new_nodes.append(concat_node)
+        final_out = concat_out
+    else:
+        final_out = out_names[0]
+
+    return new_nodes, new_inits, final_out
+
 def split_model_to_per_channel(graph, C_max=256, K_max=256, dwC_max=32, prefix="split"):
     """
     Applies the QLinearConv splitters to every QLinearConv node in the ONNX graph,
@@ -433,6 +544,20 @@ def split_model_to_per_channel(graph, C_max=256, K_max=256, dwC_max=32, prefix="
 
         new_nodes, new_inits, final_output = split_qlinearconv_node_per_output_and_input_channel(
             graph, node, k_max, C_max, prefix=f"{prefix}_{idx}"
+        )
+
+        if len(new_nodes) == 0:
+            continue
+
+        replace_qlinearconv_with_split(graph, node, new_nodes, new_inits, final_output)
+
+    # Handle QLinearMatMul nodes similarly
+    qmatmul_nodes = [node for node in graph.node if node.op_type == "QLinearMatMul"]    
+
+    for idx, node in enumerate(qmatmul_nodes):
+    
+        new_nodes, new_inits, final_output = split_qlinearmatmul_node(
+            graph, node, K_max=K_max, C_max=C_max, prefix=f"{prefix}_matmul_{idx}"
         )
 
         if len(new_nodes) == 0:

@@ -164,9 +164,7 @@ class Cgraph(object):
         shapes = []
         for id,node in enumerate(self.nodes):
             if hasattr(node,"matrix"):
-                if excludeDepthwise:
-                    if '_dwch_' in node.outputs[0]:
-                        continue    
+                # we remove the skip functionality for depthwise convolutions because dwc_nodes node longer have a matrix attribute
                 shapes.append( (*node.matrix.shape,id) )
             node.rid = id
         return shapes

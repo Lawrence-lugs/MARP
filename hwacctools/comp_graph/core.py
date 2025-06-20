@@ -46,7 +46,8 @@ class packed_model(object):
                  inshapes, 
                  imc_core_size : tuple[int],
                  infer = False,
-                 packer = None
+                 packer = None,
+                 split = True
                  ):
         '''
         Performs bin packing on cgraph and
@@ -68,7 +69,10 @@ class packed_model(object):
             return
 
         # Input is a cgraph
-        inshapes = cgraph.split_convolutions(inshapes,H=imc_core_size[0],W=imc_core_size[1])
+        if split:
+            inshapes = cgraph.split_convolutions(inshapes,H=imc_core_size[0],W=imc_core_size[1])
+
+        print('Getting shapes from cgraph')
         cgraph_shapes = inshapes._get_shape_list_id(excludeDepthwise=True)
 
         if packer is None:
