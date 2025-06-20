@@ -50,6 +50,8 @@ def get_cnode_from_onnx_node(node,nx_model, **kwargs):
         return(from_QLinearMatMul(nx_model,node))
     elif node.op_type == 'QLinearAveragePool': # For now, all average pools are global
         return(quantized_global_avg_pool_node.from_onnx_node(nx_model,node))
+    elif node.op_type == 'Slice':
+        return(slicer_node.from_onnx_node(nx_model,node))
     else:
         raise NotImplementedError(f'Node type {node.op_type} not implemented')
 
@@ -194,11 +196,12 @@ class squeeze_node(Node):
 
 
 class concat_node(Node):
-    def __init__(self, inputs:list[str], outputs:list[str], axis:int, to_concat:np.array):
+    def __init__(self, inputs:list[str], outputs:list[str], axis:int, to_concat:np.array=None):
         '''
-        Creates a node that concatenates the input with a predefined initializer
+        Creates a node that concatenates inputs along specified axis.
+        If to_concat is provided, concatenates it with the first input.
         '''
-        super(concat_node,self).__init__(inputs,outputs)
+        super(concat_node,self).__init__(inputs,outputs) 
         self.axis = axis
         self.to_concat = to_concat
 
@@ -207,18 +210,26 @@ class concat_node(Node):
         if onnx_node.op_type != 'Concat':
             raise TypeError('Input node is not a concat node')
 
-        inputs = [onnx_node.input[0]]
-        outputs = onnx_node.output
-
-        to_concat = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
-
         axis = get_attribute_by_name('axis',onnx_node.attribute).i
+
+        # Check if second input is initializer
+        if len(onnx_node.input) > 1 and is_initializer(onnx_model, onnx_node.input[1]):
+            inputs = [onnx_node.input[0]]
+            to_concat = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
+        else:
+            inputs = list(onnx_node.input)
+            to_concat = None
+            
+        outputs = onnx_node.output
 
         return concat_node(inputs,outputs,axis,to_concat)
     
-    def forward(self,inputs:np.array):
-        a = inputs[0]
-        return np.concatenate([a,self.to_concat],axis=self.axis)
+    def forward(self,inputs:list):
+        if self.to_concat is not None:
+            a = inputs[0]
+            return np.concatenate([a,self.to_concat],axis=self.axis)
+        else:
+            return np.concatenate(inputs,axis=self.axis)
 
 class dequantize_node(Node):
     '''
@@ -936,15 +947,15 @@ class channel_slicing_node(Node):
         return input_cwh_sliced
     
 class slicer_node(Node):
-    def __init__(self, inputs:list[str], outputs:list[str], row_lim:list[int] = [None,None],col_lim:list[int] = [None,None]):
+    def __init__(self, inputs:list[str], outputs:list[str], starts, ends):
         '''
-        Creates a node that slices the input array according to the slicing
-        defined by [row_lim[0]:row_lim[1],col_lim[0]:col_lim[1]]
+        Creates a node that slices the input array according to the slicing defined by starts and ends.
         '''
         super(slicer_node,self).__init__(inputs,outputs)
-        self.row_lim = row_lim
-        self.col_lim = col_lim
+        self.starts = starts
+        self.ends = ends
 
+    @classmethod 
     def from_onnx_node(self,onnx_model,onnx_node):
         if onnx_node.op_type != 'Slice':
             raise TypeError('Input node is not a slice node')
@@ -952,21 +963,20 @@ class slicer_node(Node):
         inputs = [onnx_node.input[0]]
         outputs = onnx_node.output
 
-        # Get the slicing parameters
-        starts = get_attribute_by_name('starts',onnx_node.attribute).ints
-        ends = get_attribute_by_name('ends',onnx_node.attribute).ints
+        # Get the slicing parameters from initializers
+        starts = nphelp.to_array(get_initializer_by_name(onnx_model, onnx_node.input[1]))
+        ends = nphelp.to_array(get_initializer_by_name(onnx_model, onnx_node.input[2]))
 
-        row_lim = [starts[0],ends[0]]
-        col_lim = [starts[1],ends[1]]
-
-        return slicer_node(inputs,outputs,row_lim=row_lim,col_lim=col_lim)
+        return slicer_node(inputs,outputs,starts=starts,ends=ends)
 
     def forward(self,input:np.array):
         input = np.array(input).squeeze(axis=0)
-        if len(input.shape) == 1:
-            lim = self.col_lim if self.row_lim == [None,None] else self.row_lim
-            return input[lim[0]:lim[1]]
-        return input[self.row_lim[0]:self.row_lim[1],self.col_lim[0]:self.col_lim[1]].astype(input.dtype)
+        
+        # Create slice objects for each dimension
+        slices = tuple(slice(start, end) for start, end in zip(self.starts, self.ends))
+        
+        # Apply multidimensional slicing
+        return input[slices].astype(input.dtype)
     
 class reshaper_node(Node):
     def __init__(self, inputs:list[str], outputs:list[str], channels:int):

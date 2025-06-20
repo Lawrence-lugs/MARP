@@ -120,6 +120,7 @@ def split_qlinearconv_node_per_output_channel(graph, node, K_max, prefix="split_
     Splits a QLinearConv node into multiple QLinearConv nodes with at most K_max output channels,
     then concatenates their outputs to emulate the original node.
     Handles depthwise (group==C) by setting group accordingly and slicing input/output if needed.
+    Also splits biases if present.
     """
     attr_dict = _extract_attr_dict(node)
     group = attr_dict.get('group', 1)
@@ -135,6 +136,13 @@ def split_qlinearconv_node_per_output_channel(graph, node, K_max, prefix="split_
     K = W.shape[0]
     C_in = W.shape[1]
     is_depthwise = (group != 1 and C_in == 1)
+
+    # Bias splitting
+    has_bias = len(node.input) > 8 and node.input[8] != ""
+    if has_bias:
+        bias_name = node.input[8]
+        bias_init = next(i for i in graph.initializer if i.name == bias_name)
+        bias = numpy_helper.to_array(bias_init)
 
     new_nodes = []
     new_inits = []
@@ -163,10 +171,19 @@ def split_qlinearconv_node_per_output_channel(graph, node, K_max, prefix="split_
         else:
             w_zp_split_name = weight_zp_name
 
+        # Bias split for this output chunk
+        if has_bias:
+            bias_split = bias[k_start:k_end] if bias.ndim == 1 and len(bias) == K else bias
+            bias_split_name = f"{prefix}_bias_{i}"
+            bias_split_init = numpy_helper.from_array(bias_split, name=bias_split_name)
+            new_inits.append(bias_split_init)
+
         inputs = list(node.input)
         inputs[3] = w_split_name
         inputs[4] = w_scale_split_name
         inputs[5] = w_zp_split_name
+        if has_bias:
+            inputs[8] = bias_split_name
 
         # For depthwise, slice the input tensor as well (axis=1, same as output channels)
         if is_depthwise:
@@ -225,6 +242,13 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
     C_in = W.shape[1]
     is_depthwise = (group != 1 and C_in == 1)
 
+    # Bias splitting
+    has_bias = len(node.input) > 8 and node.input[8] != ""
+    if has_bias:
+        bias_name = node.input[8]
+        bias_init = next(i for i in graph.initializer if i.name == bias_name)
+        bias = numpy_helper.to_array(bias_init)
+
     if W.shape[0] <= K_max and W.shape[1] <= C_max:
         return [node], [], node.output[0]
     if K <= K_max:
@@ -267,11 +291,8 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
             w_zp_k_name = weight_zp_name
 
         # Split biases as well
-        if len(node.input) > 6:  # Biases are present
-            bias_name = node.input[6]
-            bias_init = next(i for i in graph.initializer if i.name == bias_name)
-            bias = numpy_helper.to_array(bias_init)
-            bias_split = bias[k_start:k_end] if bias.ndim == 1 and len(bias) == K else bias
+        if has_bias:
+            bias_split = bias[k_start:k_end]
             bias_split_name = f"{prefix}_bias_{k_idx}"
             bias_split_init = numpy_helper.from_array(bias_split, name=bias_split_name)
             all_inits.append(bias_split_init)
@@ -280,7 +301,8 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
         temp_inputs[3] = w_k_name
         temp_inputs[4] = w_scale_k_name
         temp_inputs[5] = w_zp_k_name
-        temp_inputs[6] = bias_split_name if len(node.input) > 6 else node.input[6]
+        if has_bias:
+            temp_inputs[8] = bias_split_name
 
         # For depthwise, slice the input tensor as well (axis=1, same as output channels)
         if is_depthwise:
@@ -388,18 +410,29 @@ def split_qlinearconv_node_per_output_and_input_channel(graph, node, K_max, C_ma
 
     return all_nodes, all_inits, concat_out
 
-def split_model_to_per_channel(graph, C_max=256, K_max=256, prefix="split"):
+def split_model_to_per_channel(graph, C_max=256, K_max=256, dwC_max=32, prefix="split"):
     """
     Applies the QLinearConv splitters to every QLinearConv node in the ONNX graph,
-    limiting each to at most K_max output channels and C_max input channels.
+    limiting each to at most K_max output channels (dwC_max for depthwise) and C_max input channels.
     Only splits nodes with group=1 or depthwise (group==C).
     """
     qconv_nodes = [node for node in graph.node if node.op_type == "QLinearConv"]
 
     for idx, node in enumerate(qconv_nodes):
+        # Check if node is depthwise
+        attr_dict = _extract_attr_dict(node)
+        group = attr_dict.get('group', 1)
+        weight_name = node.input[3]
+        weight_init = next(i for i in graph.initializer if i.name == weight_name)
+        W = numpy_helper.to_array(weight_init)
+        C_in = W.shape[1]
+        is_depthwise = (group != 1 and C_in == 1)
+
+        # Use dwC_max for depthwise convolutions, K_max otherwise
+        k_max = dwC_max if is_depthwise else K_max
 
         new_nodes, new_inits, final_output = split_qlinearconv_node_per_output_and_input_channel(
-            graph, node, K_max, C_max, prefix=f"{prefix}_{idx}"
+            graph, node, k_max, C_max, prefix=f"{prefix}_{idx}"
         )
 
         if len(new_nodes) == 0:

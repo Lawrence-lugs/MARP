@@ -55,52 +55,7 @@ class Cgraph(object):
         '''
         node_list = []
         for node in nx_model.graph.node:
-            if node.op_type == 'Conv':
-                if node.attribute[1].i == 1:
-                    node_list.append(cnodes.conv_node.from_onnx_node(nx_model,node))
-                else:
-                    convs,catter = cnodes.conv_node.from_onnx_depthwise(nx_model,node)
-                    node_list.extend(convs)
-                    node_list.append(catter)    
-            elif node.op_type == 'Gemm':
-                node_list.append(cnodes.gemm_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Add':
-                node_list.append(cnodes.add_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Clip':
-                node_list.append(cnodes.clip_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Flatten':
-                node_list.append(cnodes.flatten_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'GlobalAveragePool':
-                node_list.append(cnodes.global_avg_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'QuantizeLinear':
-                node_list.append(cnodes.quantize_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'QLinearConv':
-                node_list.extend(cnodes.from_QLinearConv(nx_model,node,channel_minor=channel_minor))
-            elif node.op_type == 'QLinearAdd':
-                node_list.append(cnodes.quantized_linear_add_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'QLinearGlobalAveragePool':
-                node_list.append(cnodes.quantized_global_avg_pool_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'DequantizeLinear':
-                node_list.append(cnodes.dequantize_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Shape':
-                node_list.append(cnodes.shape_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Reshape':
-                node_list.append(cnodes.reshape_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Gather':
-                node_list.append(cnodes.gather_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Unsqueeze':
-                node_list.append(cnodes.unsqueeze_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Squeeze':
-                node_list.append(cnodes.squeeze_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'Concat':
-                node_list.append(cnodes.concat_node.from_onnx_node(nx_model,node))
-            elif node.op_type == 'QLinearMatMul':
-                node_list.extend(cnodes.from_QLinearMatMul(nx_model,node))
-            elif node.op_type == 'QLinearAveragePool': # For now, all average pools are global
-                node_list.append(cnodes.quantized_global_avg_pool_node.from_onnx_node(nx_model,node))
-            else:
-                raise NotImplementedError(f'Node type {node.op_type} not implemented')
-
+            cnodes.get_cnode_from_onnx_node(node, nx_model)
         return Cgraph(node_list,**kwargs)
 
     def check_if_node_done(self,node):
