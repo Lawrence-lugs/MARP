@@ -215,11 +215,12 @@ def randomize_initializer_to_binary(model, initializer_name):
 
 def randomize_model_to_binary_weights(model):
     for i,node in enumerate(model.graph.node):
-        if node.op_type == "QLinearConv":
+        if node.op_type == 'QLinearConv':
             group = get_attribute_by_name('group', node.attribute).i
             if(group == 1):
                 inii = node.input[3]
                 randomize_initializer_to_binary(model, inii)
-            # else:
-                # print(i,node.name)
+        if node.op_type == 'QLinearMatMul':
+            inii = node.input[3]
+            randomize_initializer_to_binary(model, inii)
     return model

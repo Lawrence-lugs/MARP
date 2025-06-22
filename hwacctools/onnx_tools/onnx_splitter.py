@@ -527,6 +527,8 @@ def split_model_to_per_channel(graph, C_max=256, K_max=256, dwC_max=32, prefix="
     limiting each to at most K_max output channels (dwC_max for depthwise) and C_max input channels.
     Only splits nodes with group=1 or depthwise (group==C).
     Can make sure unrolling the filter does not exceed C_max, for certain hardware constraints.
+
+    THIS FUNCTION MODIFIES THE GRAPH IN PLACE.
     """
     qconv_nodes = [node for node in graph.node if node.op_type == "QLinearConv"]
 
@@ -569,3 +571,62 @@ def split_model_to_per_channel(graph, C_max=256, K_max=256, dwC_max=32, prefix="
             continue
 
         replace_qlinearconv_with_split(graph, node, new_nodes, new_inits, final_output)
+
+    # Finally, sort the graph nodes topologically to ensure execution order
+    topological_sort_onnx_graph(graph)
+
+    return
+
+def topological_sort_onnx_graph(graph):
+    """
+    Returns a list of nodes in topological (execution) order for the given ONNX graph.\
+    
+    THIS FUNCTION MODIFIES THE GRAPH IN PLACE.
+    """
+    from collections import defaultdict, deque
+
+    # Build dependency graph
+    input_to_nodes = defaultdict(list)
+    node_inputs = {}
+    all_inputs = set()
+    for node in graph.node:
+        node_inputs[node.name] = set(node.input)
+        for inp in node.input:
+            input_to_nodes[inp].append(node)
+            all_inputs.add(inp)
+
+    # Find all available tensors (graph inputs and initializers)
+    available = set(inp.name for inp in graph.input)
+    available.update(init.name for init in graph.initializer)
+
+    # Nodes with all inputs available
+    ready = deque()
+    in_degree = {}
+    for node in graph.node:
+        missing = [inp for inp in node.input if inp not in available]
+        in_degree[node.name] = len(missing)
+        if in_degree[node.name] == 0:
+            ready.append(node)
+
+    sorted_nodes = []
+    visited = set()
+
+    while ready:
+        node = ready.popleft()
+        sorted_nodes.append(node)
+        visited.add(node.name)
+        for out in node.output:
+            for consumer in input_to_nodes.get(out, []):
+                if consumer.name in visited:
+                    continue
+                in_degree[consumer.name] -= 1
+                if in_degree[consumer.name] == 0:
+                    ready.append(consumer)
+
+    if len(sorted_nodes) != len(graph.node):
+        raise RuntimeError("Graph has cycles or disconnected nodes!")
+
+    graph.ClearField('node')
+    graph.node.extend(sorted_nodes)
+
+    return graph

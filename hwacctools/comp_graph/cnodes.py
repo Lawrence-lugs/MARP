@@ -583,7 +583,7 @@ class output_scale_node(Node):
         return out
     
 class dwc_node(Node):
-    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, strides = 1, channel_minor = False, zero_point = 0):
+    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, strides = 1, channel_minor = False, zero_point = 0, pads = (1,1,1,1)):
         '''
         Depthwise convolution node not made of separate matmuls with concatenates.
         Models ideally created DWC hardware.
@@ -594,6 +594,7 @@ class dwc_node(Node):
         assert kernel.shape[1] == 1, 'Depthwise convolution kernel must have a single input channel'
 
         self.biases = biases
+        self.pads = pads
         
         self.strides = strides
         self.channel_minor = channel_minor
@@ -612,11 +613,12 @@ class dwc_node(Node):
         outputs = onnx_node.output
 
         strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
+        pads = get_attribute_by_name('pads',onnx_node.attribute).ints[0]
         
         kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
         biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
 
-        return dwc_node(inputs,outputs,kernel,biases,strides=strides)
+        return dwc_node(inputs,outputs,kernel,biases,strides=strides,pads=pads)
 
     def forward(self,input:np.array):
         '''
@@ -654,7 +656,7 @@ class dwc_node(Node):
         return out
 
 class conv_node(Node):
-    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, in_channel = None, strides = 1, channel_minor = False, zero_point = 0):
+    def __init__(self, inputs:list[str], outputs:list[str], kernel:np.array, biases:np.array, in_channel = None, strides = 1, channel_minor = False, zero_point = 0, pads=(1,1,1,1)):
         '''
         Creates a conv node from a kernel of shape K,C,H,W
 
@@ -668,6 +670,8 @@ class conv_node(Node):
         super(conv_node,self).__init__(inputs,outputs)
         self.kernel = kernel
         self.biases = biases
+
+        self.pads = pads # Pads is current unutilized in forward(), but is necessary for core mapping.
 
         if channel_minor:
             self.matrix = kernel.transpose(0,2,3,1).reshape(kernel.shape[0],-1).T
@@ -696,11 +700,12 @@ class conv_node(Node):
         outputs = onnx_node.output
 
         strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
+        pads = get_attribute_by_name('pads',onnx_node.attribute).ints[0]
         
         kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[1]))
         biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[2]))
 
-        return conv_node(inputs,outputs,kernel,biases,strides=strides)
+        return conv_node(inputs,outputs,kernel,biases,strides=strides,pads=pads)
     
     @classmethod
     def from_onnx_depthwise(self,onnx_model,onnx_node):        

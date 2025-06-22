@@ -1,4 +1,5 @@
 from . import splitter,cnodes,cgraph, packer_utils  as pu
+from ..onnx_tools import onnx_splitter
 import numpy as np
 import onnx
 import matplotlib.pyplot as plt
@@ -32,6 +33,259 @@ def pack_matrices(cgraph,imc_core_size,packer):
     packer.add_bin(*imc_core_size,count=float("inf"))
     packer.pack()
     return cgraph,imc_core_size,packer
+
+def _infer_flattened_matrix_from_kernel(kernel_shape):
+
+    # Kernels are KCHW
+
+    ydim = np.prod(kernel_shape[1:])
+    xdim = kernel_shape[0]    
+
+    return xdim, ydim
+
+def _get_aimc_mapped_shapes_from_onnx(nx_model : onnx.ModelProto):
+    '''
+    Returns a list of matrix shapes from an ONNX model
+    and a dictionary of node IDs to name.
+    '''
+    shapes = []
+    nid_to_name = {}
+    for node_id,node in enumerate(nx_model.graph.node):
+        if node.op_type == 'QLinearConv':
+            
+            groups_attr = next(i for i in node.attribute if i.name == 'group')
+            groups = onnx.helper.get_attribute_value(groups_attr)
+            if groups != 1:
+                # Skip grouped convolutions (not mappable to AIMC)
+                continue
+
+            kernel_name = node.input[3]
+            init = next((init for init in nx_model.graph.initializer if init.name == kernel_name), None)
+            xdim, ydim = _infer_flattened_matrix_from_kernel(init.dims)
+            shapes.append((xdim, ydim, node_id))
+            nid_to_name[node_id] = node.name
+        elif node.op_type == 'QLinearMatMul':
+            weight_name = node.input[3]
+            init = next((init for init in nx_model.graph.initializer if init.name == weight_name), None)
+            shape = tuple(d for d in init.dims)
+            shapes.append((shape[0], shape[1], node_id))
+            nid_to_name[node_id] = node.name
+    return shapes, nid_to_name
+
+def check_packing_success(packer, shapes):
+    '''
+    Checks if the packing was successful by comparing the number of packed rectangles
+    with the number of shapes.
+    '''
+    if len(packer.rect_list()) != len(shapes):
+        print(f'Packing incomplete: packed {len(packer.rect_list())} vs {len(shapes)} matrices in cgraph')
+        return False
+    else:
+        print(f'Packing successful: packed {len(packer.rect_list())} vs {len(shapes)} matrices in cgraph in {len(packer)} bins')
+        return True
+    
+def pack_shapes_into_coresize_bins(packer, shapes, imc_core_size):
+
+    packer.add_bin(*imc_core_size,count=float("inf"))
+    packer = add_rects_to_packer(packer,shapes)
+    packer.pack()
+
+    return packer
+
+def get_mapped_matrices_from_packed_cgraph(cgraph, packer, imc_core_size):
+    '''
+    Takes a cgraph and a packer, and returns a list of matrices of size imc_core_size for each bin of packer.
+    '''
+
+    bin_matrices = []
+    for bin_id,bin in enumerate(packer):
+
+        # Prepare matrix for a new core
+        cell_array = np.zeros(imc_core_size)
+
+        # Populate it with the mapped matrices 
+        for mapped_rect in bin:
+            mapped_node = cgraph.nodes[mapped_rect.rid]
+
+            # Attach mapping information to the cnode
+            mapped_node.bin_id = bin_id
+            mapped_node.offset_x = mapped_rect.x
+            mapped_node.offset_y = mapped_rect.y
+
+            x1 = mapped_rect.x
+            x2 = mapped_rect.corner_top_r.x
+            y1 = mapped_rect.y
+            y2 = mapped_rect.corner_top_r.y
+
+            cell_array[y1:y2,x1:x2] = mapped_node.matrix
+
+        bin_matrices.append(cell_array)
+
+    return bin_matrices
+
+def _get_kernel_of_nx_node(nx_node : onnx.NodeProto, nx_model : onnx.ModelProto) -> np.ndarray:
+    '''
+    Returns the kernel of an ONNX node as a numpy array.
+    Assumes the node is a QLinearConv or QLinearMatMul.
+    '''
+    if nx_node.op_type not in ['QLinearConv', 'QLinearMatMul']:
+        raise ValueError(f"Node {nx_node.name} is not a QLinearConv or QLinearMatMul")
+    return _get_init_of_nx_node(nx_node, nx_model, 3) 
+
+def _get_init_of_nx_node(nx_node : onnx.NodeProto, nx_model : onnx.ModelProto, input_id) -> np.ndarray:
+    '''
+    Returns the initializer of an ONNX node as a numpy array.
+    '''
+    init_name = nx_node.input[input_id]
+    init = next((init for init in nx_model.graph.initializer if init.name == init_name), None)
+    if init is None:
+        raise ValueError(f"Initializer {init_name} not found in ONNX model")
+    return onnx.numpy_helper.to_array(init)
+
+def _get_matrix_from_kernel(kernel : np.ndarray, nx_node : onnx.NodeProto) -> np.ndarray:
+    '''
+    Obtains a channel-minor matrix from a kernel of an ONNX node
+    If the ONNX node is a QLinearMatMul, it simply returns the weight matrix
+    '''
+
+    if nx_node.op_type == 'QLinearConv':
+        # For QLinearConv, we need to reshape the kernel to a matrix
+        # The kernel is in KCHW format, we need to convert it to CHW
+        # and then to a 2D matrix
+        return kernel.transpose(0, 2, 3, 1).reshape(kernel.shape[0], -1)
+    elif nx_node.op_type == 'QLinearMatMul':
+        # For QLinearMatMul, we can directly use the weight matrix
+        return kernel.reshape(kernel.shape[0], -1)
+    else:
+        raise ValueError(f"Node {nx_node.name} is not a QLinearConv or QLinearMatMul")
+    
+class MappedBin(object):
+    '''
+    Represents a packed bin of matrices with its ID and offset
+    '''
+    def __init__(self, bin_id, weights : np.ndarray):
+        self.bin_id = bin_id
+        self.weights = weights
+
+    def __repr__(self):
+        plt.imshow(self.weights, cmap='YlOrBr', vmax=self.weights.max(), vmin=self.weights.min())
+        plt.title(f"Bin {self.bin_id}")
+        return f"MappedBin(id={self.bin_id}, shape={self.weights.shape})"
+
+class MappedOnnxNode(object):
+    '''
+    Represents a AIMC mapped ONNX QLinearConv or QLinearMatmul node with its matrix shape and ID
+    '''
+    def __init__(self, nx_node : onnx.NodeProto, bin_id, mapped_rect, nx_model : onnx.ModelProto):
+        self.node_id = mapped_rect.rid
+        self.nx_node = nx_node
+        self.bin_id = bin_id
+        self.offset_x = mapped_rect.x
+        self.offset_y = mapped_rect.y
+        self.kernel = _get_kernel_of_nx_node(nx_node, nx_model)
+        self.matrix = _get_matrix_from_kernel(self.kernel, nx_node)     
+
+        self.name = nx_node.name
+        self.type = nx_node.op_type
+
+        pads_attr = next((attr for attr in nx_node.attribute if attr.name == 'pads'), None)
+        self.pads = pads_attr.ints if pads_attr else (0, 0, 0, 0)
+        strides_attr = next((attr for attr in nx_node.attribute if attr.name == 'strides'), None)
+        self.strides = strides_attr.ints if strides_attr else (1, 1)
+
+        self.x_scale = _get_init_of_nx_node(nx_node, nx_model, 1)
+        self.x_zp = _get_init_of_nx_node(nx_node, nx_model, 2)
+        self.w_scale = _get_init_of_nx_node(nx_node, nx_model, 4)
+        self.w_zp = _get_init_of_nx_node(nx_node, nx_model, 5)
+        self.y_scale = _get_init_of_nx_node(nx_node, nx_model, 6)
+        self.y_zp = _get_init_of_nx_node(nx_node, nx_model, 7)
+        self.biases = _get_init_of_nx_node(nx_node, nx_model, 8) if len(nx_node.input) > 8 else None
+
+    def __repr__(self):
+        return f"MappedOnnxNode(id={self.node_id}, name={self.name}, type={self.type}, bin_id={self.bin_id}, shape={self.matrix.shape})"
+
+class NxModelMapping(object):
+    '''
+    Maps an ONNX model to a cgraph and packs it into imc_core_size sized matrices
+    Must take in split onnx model already
+    '''
+    def __init__(self,
+                 nx_model : onnx.ModelProto,
+                 imc_core_size : tuple[int] = (256, 256),
+                 dwc_core_size : int = 32,
+                 packer = None,
+                 **kwargs
+                 ):
+        
+        onnx_splitter.split_model_to_per_channel(nx_model.graph, C_max = imc_core_size[0], K_max = imc_core_size[1], dwC_max=dwc_core_size)
+        nx_shapes, nid_to_name = _get_aimc_mapped_shapes_from_onnx(nx_model)
+
+        if packer is None: packer = rectpack.newPacker(mode=rectpack.PackingMode.Offline, rotation=False, pack_algo=rectpack.MaxRectsBssf)
+
+        packer = pack_shapes_into_coresize_bins(packer, nx_shapes, imc_core_size)
+        check_packing_success(packer, nx_shapes)
+
+        self.nid_to_name = nid_to_name
+        self.nbins = len(packer)
+        self.rects = nx_shapes
+        self.packer = packer
+        self.core_size = imc_core_size
+        self.nx_model = nx_model
+
+        self._setup_mapping_from_packed_onnx()
+
+        return
+    
+    def _setup_mapping_from_packed_onnx(self):
+
+        mapped_nodes = []
+        mapped_bins = []
+        for bin_id,bin in enumerate(self.packer):
+
+            # Prepare matrix for a new core
+            cell_array = np.zeros(self.core_size)
+
+            # Populate it with the mapped nodes 
+            for mapped_rect in bin:
+                nx_node = self.nx_model.graph.node[mapped_rect.rid]
+
+                # Attach mapping information to the node
+                mapped_node = MappedOnnxNode(
+                    nx_node = nx_node, 
+                    bin_id = bin_id, 
+                    mapped_rect = mapped_rect, 
+                    nx_model = self.nx_model
+                )
+                mapped_nodes.append(mapped_node)
+
+                # Fill up the weight matrix of the bin
+                x1 = mapped_rect.x
+                x2 = mapped_rect.corner_top_r.x
+                y1 = mapped_rect.y
+                y2 = mapped_rect.corner_top_r.y
+                kernel = _get_kernel_of_nx_node(nx_node, self.nx_model)
+
+                cell_array[y1:y2, x1:x2] = _get_matrix_from_kernel(kernel, nx_node)
+            
+            mapped_bins.append(MappedBin(bin_id, cell_array))
+
+        # Reorder mapped nodes by their node_id
+        self.mapped_nodes = sorted(mapped_nodes, key=lambda node: node.node_id)
+        self.mapped_bins = mapped_bins
+
+        return 
+    
+    def plot(self, bin = None, filepath = None, name = None):
+        '''
+        Plots the packed model as a grid of rectangles
+        '''
+
+        pu.plot_packing_efficient(self.packer,filepath=filepath, name=name)
+        return
+    
+    def __repr__(self):
+        self.plot()
+        return f"NxModelMapping(nbins={self.nbins}, core_size={self.core_size})"
 
 class packed_model(object):
     '''
@@ -79,38 +333,12 @@ class packed_model(object):
             print('Packer is none. Using default offline MaxRectsBSSF.')
             packer = rectpack.newPacker(mode=rectpack.PackingMode.Offline, rotation=False, pack_algo=rectpack.MaxRectsBssf)
 
-        packer.add_bin(*imc_core_size,count=float("inf"))
-        packer = add_rects_to_packer(packer,cgraph_shapes)
-        if hasattr(packer,'pack'):
-            packer.pack()
-
-        if len(packer.rect_list()) != len(cgraph_shapes):
-            print(f'Packing incomplete: packed {len(packer.rect_list())} vs {len(cgraph_shapes)} matrices in cgraph')
-        else:
-            print(f'Packing successful: packed {len(packer.rect_list())} vs {len(cgraph_shapes)} matrices in cgraph in {len(packer)} bins')
+        packer = pack_shapes_into_coresize_bins(packer, cgraph_shapes, imc_core_size)
+        check_packing_success(packer, cgraph_shapes)
 
         self.nbins = len(packer)
         self.cgraph_shapes = cgraph_shapes
-
-        self.bin_matrices = []
-        for bin in packer:
-
-            # Prepare matrix for a new core
-            cell_array = np.zeros(imc_core_size)
-
-            # Populate it with the mapped matrices 
-            for mapped_rect in bin:
-                mapped_node = inshapes.nodes[mapped_rect.rid]
-
-                x1 = mapped_rect.x
-                x2 = mapped_rect.corner_top_r.x
-                y1 = mapped_rect.y
-                y2 = mapped_rect.corner_top_r.y
-
-                cell_array[y1:y2,x1:x2] = mapped_node.matrix
-
-            self.bin_matrices.append(cell_array)
-
+        self.bin_matrices = get_mapped_matrices_from_packer(inshapes, packer, imc_core_size)
         self.packer = packer
         self.cgraph = inshapes
         self.core_size = imc_core_size
