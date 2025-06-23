@@ -172,16 +172,25 @@ class MappedBin(object):
         plt.title(f"Bin {self.bin_id}")
         return f"MappedBin(id={self.bin_id}, shape={self.weights.shape})"
 
-class MappedOnnxNode(object):
+class MappedQRAccNode(object):
     '''
-    Represents a AIMC mapped ONNX QLinearConv or QLinearMatmul node with its matrix shape and ID
+    Represents a QRAcc mapped ONNX QLinearConv or QLinearMatmul node with its matrix shape and ID
     '''
     def __init__(self, nx_node : onnx.NodeProto, bin_id, mapped_rect, nx_model : onnx.ModelProto):
-        self.node_id = mapped_rect.rid
-        self.nx_node = nx_node
+        
+        self.depthwise = (bin_id is None)  # Depthwise nodes are not packed, so bin_id is None
         self.bin_id = bin_id
-        self.offset_x = mapped_rect.x
-        self.offset_y = mapped_rect.y
+        self.nx_node = nx_node
+         
+        # Inefficient, but guaranteed to find the node ID
+        self.node_id = next((i for i, n in enumerate(nx_model.graph.node) if n.name == nx_node.name), None)
+        if mapped_rect is None:
+            self.offset_x = 0
+            self.offset_y = 0
+        else:
+            self.offset_x = mapped_rect.x
+            self.offset_y = mapped_rect.y
+
         self.kernel = _get_kernel_of_nx_node(nx_node, nx_model)
         self.matrix = _get_matrix_from_kernel(self.kernel, nx_node)     
 
@@ -202,7 +211,7 @@ class MappedOnnxNode(object):
         self.biases = _get_init_of_nx_node(nx_node, nx_model, 8) if len(nx_node.input) > 8 else None
 
     def __repr__(self):
-        return f"MappedOnnxNode(id={self.node_id}, name={self.name}, type={self.type}, bin_id={self.bin_id}, shape={self.matrix.shape})"
+        return f"MappedQRAccNode(id={self.node_id}, name={self.name}, type={self.type}, bin_id={self.bin_id}, shape={self.matrix.shape}, depthwise={self.depthwise})"
 
 class NxModelMapping(object):
     '''
@@ -232,14 +241,36 @@ class NxModelMapping(object):
         self.core_size = imc_core_size
         self.nx_model = nx_model
 
+        self.mapped_nodes = []
+        self.mapped_bins = []
         self._setup_mapping_from_packed_onnx()
+        self._setup_mapping_of_depthwise_nodes()
+
+        # Reorder mapped nodes by their node_id
+        self.mapped_nodes = sorted(self.mapped_nodes, key=lambda node: node.node_id)
+
+        return
+    
+    def _setup_mapping_of_depthwise_nodes(self):
+
+        for node_id,node in enumerate(self.nx_model.graph.node):
+            if node.op_type == 'QLinearConv':
+                groups_attr = next((attr for attr in node.attribute if attr.name == 'group'), None)
+                groups = onnx.helper.get_attribute_value(groups_attr) if groups_attr else 1
+                if groups > 1:
+                    # This is a depthwise convolution, just generate a MappedQRAccNode for it
+                    mapped_node = MappedQRAccNode(
+                        nx_node = node, 
+                        bin_id = None,  # Depthwise nodes are not packed
+                        mapped_rect = None,  # No rectangle for depthwise nodes
+                        nx_model = self.nx_model
+                    )
+                    self.mapped_nodes.append(mapped_node)
 
         return
     
     def _setup_mapping_from_packed_onnx(self):
 
-        mapped_nodes = []
-        mapped_bins = []
         for bin_id,bin in enumerate(self.packer):
 
             # Prepare matrix for a new core
@@ -250,13 +281,13 @@ class NxModelMapping(object):
                 nx_node = self.nx_model.graph.node[mapped_rect.rid]
 
                 # Attach mapping information to the node
-                mapped_node = MappedOnnxNode(
+                mapped_node = MappedQRAccNode(
                     nx_node = nx_node, 
                     bin_id = bin_id, 
                     mapped_rect = mapped_rect, 
                     nx_model = self.nx_model
                 )
-                mapped_nodes.append(mapped_node)
+                self.mapped_nodes.append(mapped_node)
 
                 # Fill up the weight matrix of the bin
                 x1 = mapped_rect.x
@@ -267,11 +298,8 @@ class NxModelMapping(object):
 
                 cell_array[y1:y2, x1:x2] = _get_matrix_from_kernel(kernel, nx_node)
             
-            mapped_bins.append(MappedBin(bin_id, cell_array))
+            self.mapped_bins.append(MappedBin(bin_id, cell_array))
 
-        # Reorder mapped nodes by their node_id
-        self.mapped_nodes = sorted(mapped_nodes, key=lambda node: node.node_id)
-        self.mapped_bins = mapped_bins
 
         return 
     
