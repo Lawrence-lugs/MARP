@@ -173,13 +173,24 @@ class MappedBin(object):
         plt.title(f"Bin {self.bin_id}")
         return f"MappedBin(id={self.bin_id}, shape={self.weights.shape})"
 
+def check_if_depthwise(nx_node : onnx.NodeProto) -> bool:
+    '''
+    Checks if an ONNX node is a depthwise convolution
+    '''
+    if nx_node.op_type != 'QLinearConv':
+        return False
+    groups_attr = next((attr for attr in nx_node.attribute if attr.name == 'group'), None)
+    groups = onnx.helper.get_attribute_value(groups_attr) if groups_attr else 1
+    return groups > 1
+
 class MappedQRAccNode(object):
     '''
     Represents a QRAcc mapped ONNX QLinearConv or QLinearMatmul node with its matrix shape and ID
     '''
     def __init__(self, nx_node : onnx.NodeProto, bin_id, mapped_rect, nx_model : onnx.ModelProto, offset_x = 0, offset_y = 0):
-        
-        self.depthwise = (bin_id is None)  # Depthwise nodes are not packed, so bin_id is None
+
+        self.depthwise = check_if_depthwise(nx_node)
+
         self.bin_id = bin_id
         self.nx_node = nx_node
          
