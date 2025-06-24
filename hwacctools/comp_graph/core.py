@@ -5,6 +5,7 @@ import onnx
 import matplotlib.pyplot as plt
 import rectpack
 import seaborn as sns
+from ..quantization import quant as q
 
 def get_ids_for_shapelist(shapelist):
     outlist = []
@@ -152,7 +153,7 @@ def _get_matrix_from_kernel(kernel : np.ndarray, nx_node : onnx.NodeProto) -> np
         # For QLinearConv, we need to reshape the kernel to a matrix
         # The kernel is in KCHW format, we need to convert it to CHW
         # and then to a 2D matrix
-        return kernel.transpose(0, 2, 3, 1).reshape(kernel.shape[0], -1)
+        return kernel.transpose(0, 2, 3, 1).reshape(kernel.shape[0], -1).T
     elif nx_node.op_type == 'QLinearMatMul':
         # For QLinearMatMul, we can directly use the weight matrix
         return kernel.reshape(kernel.shape[0], -1)
@@ -176,7 +177,7 @@ class MappedQRAccNode(object):
     '''
     Represents a QRAcc mapped ONNX QLinearConv or QLinearMatmul node with its matrix shape and ID
     '''
-    def __init__(self, nx_node : onnx.NodeProto, bin_id, mapped_rect, nx_model : onnx.ModelProto):
+    def __init__(self, nx_node : onnx.NodeProto, bin_id, mapped_rect, nx_model : onnx.ModelProto, offset_x = 0, offset_y = 0):
         
         self.depthwise = (bin_id is None)  # Depthwise nodes are not packed, so bin_id is None
         self.bin_id = bin_id
@@ -185,8 +186,8 @@ class MappedQRAccNode(object):
         # Inefficient, but guaranteed to find the node ID
         self.node_id = next((i for i, n in enumerate(nx_model.graph.node) if n.name == nx_node.name), None)
         if mapped_rect is None:
-            self.offset_x = 0
-            self.offset_y = 0
+            self.offset_x = offset_x
+            self.offset_y = offset_y
         else:
             self.offset_x = mapped_rect.x
             self.offset_y = mapped_rect.y
@@ -208,7 +209,16 @@ class MappedQRAccNode(object):
         self.w_zp = _get_init_of_nx_node(nx_node, nx_model, 5)
         self.y_scale = _get_init_of_nx_node(nx_node, nx_model, 6)
         self.y_zp = _get_init_of_nx_node(nx_node, nx_model, 7)
-        self.biases = _get_init_of_nx_node(nx_node, nx_model, 8) if len(nx_node.input) > 8 else None
+
+        self.biases = _get_init_of_nx_node(nx_node, nx_model, 8) if len(nx_node.input) > 8 else 0
+        ifmap_zp_offset = self.x_zp * self.kernel.sum(axis=(1,2,3))
+        self.biases = self.biases - ifmap_zp_offset # Fold the zero point offset contribution into the overall biases
+
+        # repeat biases to match the number of output channels if biases is a scalar
+        if np.isscalar(self.biases):
+            self.biases = np.full((self.kernel.shape[0],), self.biases, dtype=np.int32)
+
+        self.scale = self.x_scale * self.w_scale / self.y_scale
 
     def __repr__(self):
         return f"MappedQRAccNode(id={self.node_id}, name={self.name}, type={self.type}, bin_id={self.bin_id}, shape={self.matrix.shape}, depthwise={self.depthwise})"

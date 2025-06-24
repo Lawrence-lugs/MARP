@@ -224,3 +224,52 @@ def randomize_model_to_binary_weights(model):
             inii = node.input[3]
             randomize_initializer_to_binary(model, inii)
     return model
+
+import onnx
+from onnx import helper, numpy_helper
+
+def make_single_node_model(nx_node, initializer_dict, input_names, output_names):
+    """
+    Create an ONNX ModelProto with a single node and a set of initializers.
+
+    Args:
+        nx_node (onnx.NodeProto): The ONNX node to include in the model.
+        initializer_dict (dict): Dictionary of {name: np.ndarray} for initializers.
+
+    Returns:
+        onnx.ModelProto: The constructed ONNX model.
+    """
+    # Collect input/output names
+
+    # Create ValueInfoProto for inputs/outputs
+    inputs_vi = []
+    for name in input_names:
+        # If the input is in initializers, get shape/type from the array
+        if name in initializer_dict:
+            arr = initializer_dict[name]
+            vi = helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape)
+        else:
+            # Unknown shape/type, use float32 [1]
+            vi = helper.make_tensor_value_info(name, onnx.TensorProto.UINT8, ['N', 'C', 'H', 'W'])
+        inputs_vi.append(vi)
+
+    outputs_vi = [helper.make_tensor_value_info(name, onnx.TensorProto.UINT8, ['N', 'C', 'H', 'W']) for name in output_names]
+
+    # Create initializers
+    initializers = [
+        numpy_helper.from_array(arr, name=name)
+        for name, arr in initializer_dict.items()
+    ]
+
+    # Build the graph
+    graph = helper.make_graph(
+        nodes=[nx_node],
+        name="single_node_graph",
+        inputs=inputs_vi,
+        outputs=outputs_vi,
+        initializer=initializers,
+    )
+
+    # Build the model
+    model = helper.make_model(graph, producer_name="make_single_node_model")
+    return model
