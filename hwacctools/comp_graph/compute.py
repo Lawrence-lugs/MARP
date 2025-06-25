@@ -7,7 +7,7 @@ def get_recfield_for_pixel(r,c,matrix,ksize):
     if ksize == 3:
         return matrix[r:r+3,c:c+3].transpose(2,0,1)
 
-def toeplitzize_input(in_tensor,ksize=3,strides=1,channel_minor = False, zero_point = 0, pads = (1,1,1,1)):
+def toeplitzize_input(in_tensor,ksize=3,strides=1,channel_minor = False, zero_point = 0, pads = (1,1,1,1), kernel_shape = None):
     '''
     Flattens input tensor into a Toeplitz matrix for passing into a
     flattened kernel. Zero pads by default.
@@ -16,9 +16,12 @@ def toeplitzize_input(in_tensor,ksize=3,strides=1,channel_minor = False, zero_po
 
     Assumes B=1 for now
     '''
+    if kernel_shape is None:
+        kernel_shape = (ksize,ksize)
 
     #Convert to B,H,W,C tensor
     tensor = in_tensor.transpose(1,2,0)
+    ifmap_shape = tensor.shape
 
     if type(strides) is int:
         stridesx = strides
@@ -27,8 +30,8 @@ def toeplitzize_input(in_tensor,ksize=3,strides=1,channel_minor = False, zero_po
         stridesx = strides[0]
         stridesy = strides[1]
 
-    H = tensor.shape[0] // stridesx
-    W = tensor.shape[1] // stridesy
+    H = tensor.shape[0] - kernel_shape[0] + 2 * pads[0] // stridesx + 1
+    W = tensor.shape[1] - kernel_shape[1] + 2 * pads[1] // stridesy + 1
     C = tensor.shape[2] 
 
     firstpad = (pads[0], pads[1])
