@@ -22,20 +22,124 @@ def add_tensor_to_model_outputs(model, tensor_name):
     model.graph.output.append(layer_value_info)
     return model
 
-def get_intermediate_tensor_value(modelpath, tensor_name, input_array = None, input_dict = None):
-    if input_array is None and input_dict is None:
-        raise ValueError("Either input_array or input_dict must be provided.")
-
-    if input_dict is None:
-        input_dict = {'input': input_array}         
-
+def get_intermediate_tensor_value(modelpath, tensor_name, input_dict=None):
+    """
+    Get the value of an intermediate tensor from an ONNX model.
+    Works on a copy of the model to preserve the original.
+    
+    Args:
+        modelpath: Path to the ONNX model or the model itself
+        tensor_name: Name of the tensor to extract
+        input_dict: Dictionary of input tensors {name: value}
+    
+    Returns:
+        The value of the specified tensor
+    """
+    # Load model and create a copy
     if type(modelpath) == str:
-        model = onnx.load(modelpath)
-    else :
-        model = modelpath
+        original_model = onnx.load(modelpath)
+    else:
+        original_model = modelpath
     
+    # Create a deep copy of the model
+    model = onnx.ModelProto()
+    model.CopyFrom(original_model)
+    
+    # Create a new model with the specified tensor as output
     model = add_tensor_to_model_outputs(model, tensor_name)
+
+    # Remove inputs from model that are not in input_dict
+    input_names = list(input_dict.keys())
+    model_inputs = list(model.graph.input)
+    for input_info in model_inputs:
+        if input_info.name not in input_names:
+            model.graph.input.remove(input_info)
+
+    model_outputs = list(model.graph.output)
+    for output_info in model_outputs:
+        if output_info.name != tensor_name:
+            model.graph.output.remove(output_info)
+
+    # Handle intermediate tensors as inputs
+    for input_tensor_name,input_tensor in input_dict.items():
+        if input_tensor_name not in [inp.name for inp in model.graph.input]:
+            # print(f'Input tensor {input_tensor_name} is not original input. Input tensor name provided:', input_tensor_name)
+            
+            # Rename node outputs that match input_tensor_name
+            for node in model.graph.node:
+                for i, output_name in enumerate(node.output):
+                    if output_name == input_tensor_name:
+                        new_output_name = f"{output_name}_original"
+                        node.output[i] = new_output_name
+                        # print(f"Renamed node output from {input_tensor_name} to {new_output_name}")
+            
+            # Add the intermediate tensor as a new input with proper type information
+            if hasattr(input_tensor, 'dtype'):
+                elem_type = onnx.helper.np_dtype_to_tensor_dtype(input_tensor.dtype)
+            else:
+                elem_type = onnx.TensorProto.UINT8
+            
+            input_info = helper.make_tensor_value_info(
+                name=input_tensor_name,
+                elem_type=elem_type,
+                shape = None
+            )
+            model.graph.input.append(input_info)
     
+    # Remove nodes that are now unconnected to the main graph
+    used_inputs = set([inp.name for inp in model.graph.input])
+    used_outputs = set([out.name for out in model.graph.output])
+    original_outputs = set([out.name for out in model.graph.output])
+    obtained_outputs = set()
+
+    # Process nodes to find all connections
+    connected_nodes = []
+    changed = True
+    while changed:
+        changed = False
+        
+        if original_outputs.issubset(obtained_outputs):
+            break
+
+        for node in model.graph.node:
+
+            if original_outputs.issubset(obtained_outputs):
+                break
+
+            if node in connected_nodes:
+                continue
+                
+            is_connected = False
+            for inp in node.input:
+                if inp in used_outputs or inp in used_inputs:
+                    is_connected = True
+                    obtained_outputs.update(node.output)
+                    break
+                    
+            if is_connected:
+                connected_nodes.append(node)
+                for out in node.output:
+                    used_outputs.add(out)
+                changed = True
+
+    # Create a new graph with only the connected nodes
+    new_nodes = [node for node in model.graph.node if node in connected_nodes]
+    model.graph.ClearField("node")
+    model.graph.node.extend(new_nodes)
+
+    # Keep only used initializers
+    used_initializers = set()
+    for node in model.graph.node:
+        used_initializers.update(node.input)
+    
+    new_initializers = [
+        init for init in model.graph.initializer 
+        if init.name in used_initializers or init.name in used_outputs
+    ]
+    
+    model.graph.ClearField("initializer")
+    model.graph.initializer.extend(new_initializers)
+
     return infer(model, input_dict)[-1]
 
 def infer(nx_model, input_dict):

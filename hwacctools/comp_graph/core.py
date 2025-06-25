@@ -69,7 +69,7 @@ def _get_aimc_mapped_shapes_from_onnx(nx_model : onnx.ModelProto):
             weight_name = node.input[3]
             init = next((init for init in nx_model.graph.initializer if init.name == weight_name), None)
             shape = tuple(d for d in init.dims)
-            shapes.append((shape[0], shape[1], node_id))
+            shapes.append((shape[1], shape[0], node_id))
             nid_to_name[node_id] = node.name
     return shapes, nid_to_name
 
@@ -131,7 +131,13 @@ def _get_kernel_of_nx_node(nx_node : onnx.NodeProto, nx_model : onnx.ModelProto)
     '''
     if nx_node.op_type not in ['QLinearConv', 'QLinearMatMul']:
         raise ValueError(f"Node {nx_node.name} is not a QLinearConv or QLinearMatMul")
-    return _get_init_of_nx_node(nx_node, nx_model, 3) 
+    
+    kernel = _get_init_of_nx_node(nx_node, nx_model, 3) 
+    if kernel.ndim == 2:
+    # If the kernel is 2D, it is a QLinearMatMul
+        kernel = kernel.reshape((kernel.shape[1],kernel.shape[0], 1, 1)) # Pretend it's a pointwise convolution
+
+    return kernel
 
 def _get_init_of_nx_node(nx_node : onnx.NodeProto, nx_model : onnx.ModelProto, input_id) -> np.ndarray:
     '''
@@ -148,17 +154,7 @@ def _get_matrix_from_kernel(kernel : np.ndarray, nx_node : onnx.NodeProto) -> np
     Obtains a channel-minor matrix from a kernel of an ONNX node
     If the ONNX node is a QLinearMatMul, it simply returns the weight matrix
     '''
-
-    if nx_node.op_type == 'QLinearConv':
-        # For QLinearConv, we need to reshape the kernel to a matrix
-        # The kernel is in KCHW format, we need to convert it to CHW
-        # and then to a 2D matrix
-        return kernel.transpose(0, 2, 3, 1).reshape(kernel.shape[0], -1).T
-    elif nx_node.op_type == 'QLinearMatMul':
-        # For QLinearMatMul, we can directly use the weight matrix
-        return kernel.reshape(kernel.shape[0], -1)
-    else:
-        raise ValueError(f"Node {nx_node.name} is not a QLinearConv or QLinearMatMul")
+    return kernel.transpose(0, 2, 3, 1).reshape(kernel.shape[0], -1).T
     
 class MappedBin(object):
     '''
@@ -169,7 +165,7 @@ class MappedBin(object):
         self.weights = weights
 
     def __repr__(self):
-        plt.imshow(self.weights, cmap='YlOrBr', vmax=self.weights.max(), vmin=self.weights.min())
+        plt.imshow(self.weights, cmap='YlOrBr', vmax=self.weights.max(), vmin=self.weights.min(), origin='lower')
         plt.title(f"Bin {self.bin_id}")
         return f"MappedBin(id={self.bin_id}, shape={self.weights.shape})"
 
@@ -200,11 +196,11 @@ class MappedQRAccNode(object):
             self.offset_x = offset_x
             self.offset_y = offset_y
         else:
-            self.offset_x = mapped_rect.x
-            self.offset_y = mapped_rect.y
+            self.offset_x = mapped_rect.y
+            self.offset_y = mapped_rect.x
 
-        self.kernel = _get_kernel_of_nx_node(nx_node, nx_model)
-        self.matrix = _get_matrix_from_kernel(self.kernel, nx_node)     
+        self.kernel = _get_kernel_of_nx_node(nx_node, nx_model).astype(np.int8)  # Ensure kernel is in int8 format
+        self.matrix = _get_matrix_from_kernel(self.kernel, nx_node).astype(np.int8)  # Ensure matrix is in int8 format     
 
         self.name = nx_node.name
         self.type = nx_node.op_type
@@ -222,7 +218,7 @@ class MappedQRAccNode(object):
         self.y_zp = _get_init_of_nx_node(nx_node, nx_model, 7)
 
         self.biases = _get_init_of_nx_node(nx_node, nx_model, 8) if len(nx_node.input) > 8 else 0
-        ifmap_zp_offset = self.x_zp * self.kernel.sum(axis=(1,2,3))
+        ifmap_zp_offset = self.x_zp * self.kernel.sum(axis=(1,2,3)) if self.kernel.ndim == 4 else self.x_zp * self.kernel.sum(axis=0)
         self.biases = self.biases - ifmap_zp_offset # Fold the zero point offset contribution into the overall biases
 
         # repeat biases to match the number of output channels if biases is a scalar
@@ -295,7 +291,7 @@ class NxModelMapping(object):
         for bin_id,bin in enumerate(self.packer):
 
             # Prepare matrix for a new core
-            cell_array = np.zeros(self.core_size)
+            cell_array = np.zeros(self.core_size, dtype=np.int8)
 
             # Populate it with the mapped nodes 
             for mapped_rect in bin:
@@ -317,7 +313,7 @@ class NxModelMapping(object):
                 y2 = mapped_rect.corner_top_r.y
                 kernel = _get_kernel_of_nx_node(nx_node, self.nx_model)
 
-                cell_array[y1:y2, x1:x2] = _get_matrix_from_kernel(kernel, nx_node)
+                cell_array[x1:x2, y1:y2] = _get_matrix_from_kernel(kernel, nx_node)
             
             self.mapped_bins.append(MappedBin(bin_id, cell_array))
 
