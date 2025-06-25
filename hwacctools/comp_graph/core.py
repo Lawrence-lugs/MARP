@@ -132,14 +132,14 @@ def _get_kernel_of_nx_node(nx_node : onnx.NodeProto, nx_model : onnx.ModelProto)
     if nx_node.op_type not in ['QLinearConv', 'QLinearMatMul']:
         raise ValueError(f"Node {nx_node.name} is not a QLinearConv or QLinearMatMul")
     
-    kernel = _get_init_of_nx_node(nx_node, nx_model, 3) 
+    kernel = get_init_of_nx_node(nx_node, nx_model, 3) 
     if kernel.ndim == 2:
     # If the kernel is 2D, it is a QLinearMatMul
         kernel = kernel.reshape((kernel.shape[1],kernel.shape[0], 1, 1)) # Pretend it's a pointwise convolution
 
     return kernel
 
-def _get_init_of_nx_node(nx_node : onnx.NodeProto, nx_model : onnx.ModelProto, input_id) -> np.ndarray:
+def get_init_of_nx_node(nx_node : onnx.NodeProto, nx_model : onnx.ModelProto, input_id) -> np.ndarray:
     '''
     Returns the initializer of an ONNX node as a numpy array.
     '''
@@ -210,14 +210,14 @@ class MappedQRAccNode(object):
         strides_attr = next((attr for attr in nx_node.attribute if attr.name == 'strides'), None)
         self.strides = strides_attr.ints if strides_attr else (1, 1)
 
-        self.x_scale = _get_init_of_nx_node(nx_node, nx_model, 1)
-        self.x_zp = _get_init_of_nx_node(nx_node, nx_model, 2)
-        self.w_scale = _get_init_of_nx_node(nx_node, nx_model, 4)
-        self.w_zp = _get_init_of_nx_node(nx_node, nx_model, 5)
-        self.y_scale = _get_init_of_nx_node(nx_node, nx_model, 6)
-        self.y_zp = _get_init_of_nx_node(nx_node, nx_model, 7)
+        self.x_scale = get_init_of_nx_node(nx_node, nx_model, 1)
+        self.x_zp = get_init_of_nx_node(nx_node, nx_model, 2)
+        self.w_scale = get_init_of_nx_node(nx_node, nx_model, 4)
+        self.w_zp = get_init_of_nx_node(nx_node, nx_model, 5)
+        self.y_scale = get_init_of_nx_node(nx_node, nx_model, 6)
+        self.y_zp = get_init_of_nx_node(nx_node, nx_model, 7)
 
-        self.biases = _get_init_of_nx_node(nx_node, nx_model, 8) if len(nx_node.input) > 8 else 0
+        self.biases = get_init_of_nx_node(nx_node, nx_model, 8) if len(nx_node.input) > 8 else 0
         ifmap_zp_offset = self.x_zp * self.kernel.sum(axis=(1,2,3)) if self.kernel.ndim == 4 else self.x_zp * self.kernel.sum(axis=0)
         self.biases = self.biases - ifmap_zp_offset # Fold the zero point offset contribution into the overall biases
 
