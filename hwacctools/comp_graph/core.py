@@ -351,9 +351,26 @@ class NxModelMapping(object):
             
             self.mapped_bins.append(MappedBin(bin_id, cell_array))
 
-
         return 
     
+    def get_mapped_node_by_id(self, node_id):
+        '''
+        Returns a mapped node by its ID
+        '''
+        for node in self.mapped_nodes:
+            if node.node_id == node_id:
+                return node
+        raise ValueError(f"Node with ID {node_id} not found in mapped nodes")
+    
+    def get_bin_of_node_id(self, node_id):
+        '''
+        Returns the bin of a mapped node
+        '''
+        mapped_node = self.get_mapped_node_by_id(node_id)
+        if mapped_node.depthwise:
+            return None
+        return self.mapped_bins[mapped_node.bin_id] 
+
     def plot(self, bin = None, filepath = None, name = None):
         '''
         Plots the packed model as a grid of rectangles
