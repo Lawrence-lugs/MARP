@@ -155,19 +155,6 @@ def _get_matrix_from_kernel(kernel : np.ndarray, nx_node : onnx.NodeProto) -> np
     If the ONNX node is a QLinearMatMul, it simply returns the weight matrix
     '''
     return kernel.transpose(0, 2, 3, 1).reshape(kernel.shape[0], -1).T
-    
-class MappedBin(object):
-    '''
-    Represents a packed bin of matrices with its ID and offset
-    '''
-    def __init__(self, bin_id, weights : np.ndarray):
-        self.bin_id = bin_id
-        self.weights = weights
-
-    def __repr__(self):
-        plt.imshow(self.weights, cmap='YlOrBr', vmax=self.weights.max(), vmin=self.weights.min(), origin='lower')
-        plt.title(f"Bin {self.bin_id}")
-        return f"MappedBin(id={self.bin_id}, shape={self.weights.shape})"
 
 def check_if_depthwise(nx_node : onnx.NodeProto) -> bool:
     '''
@@ -191,6 +178,19 @@ def _get_overall_scale_factors(w_scale, x_scale, y_scale, length):
         return np.full((length,), scale[0], dtype=np.float32)
     elif len(scale) == length:
         return scale.astype(np.float32)
+    
+class MappedBin(object):
+    '''
+    Represents a packed bin of matrices with its ID and offset
+    '''
+    def __init__(self, bin_id, weights : np.ndarray):
+        self.bin_id = bin_id
+        self.weights = weights
+
+    def __repr__(self):
+        plt.imshow(self.weights, cmap='YlOrBr', vmax=self.weights.max(), vmin=self.weights.min(), origin='lower')
+        plt.title(f"Bin {self.bin_id}")
+        return f"MappedBin(id={self.bin_id}, shape={self.weights.shape})"
 
 class MappedQRAccNode(object):
     '''
@@ -248,7 +248,21 @@ class MappedQRAccNode(object):
         return
 
     def __repr__(self):
-        return f"MappedQRAccNode(id={self.node_id}, name={self.name}, type={self.type}, bin_id={self.bin_id}, shape={self.matrix.shape}, depthwise={self.depthwise})"
+        attrs = [
+            f"id: {self.node_id}",
+            f"name: {self.name}", 
+            f"type: {self.type}",
+            f"bin_id: {self.bin_id}",
+            f"shape: {self.matrix.shape}",
+            f"depthwise: {self.depthwise}",
+            f"offset_x: {self.offset_x}",
+            f"offset_y: {self.offset_y}",
+            f"pads: {self.pads}",
+            f"strides: {self.strides}",
+            f"scale: {self.scale.shape}",
+            f"biases: {self.biases.shape}"
+        ]
+        return "MappedQRAccNode(\n    " + "\n    ".join(attrs) + "\n)"
 
 class NxModelMapping(object):
     '''
