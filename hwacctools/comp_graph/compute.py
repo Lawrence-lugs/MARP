@@ -30,8 +30,8 @@ def toeplitzize_input(in_tensor,ksize=3,strides=1,channel_minor = False, zero_po
         stridesx = strides[0]
         stridesy = strides[1]
 
-    H = tensor.shape[0] - kernel_shape[0] + 2 * pads[0] // stridesx + 1
-    W = tensor.shape[1] - kernel_shape[1] + 2 * pads[1] // stridesy + 1
+    H = (tensor.shape[0] - kernel_shape[0] + 2 * pads[0]) // stridesx + 1
+    W = (tensor.shape[1] - kernel_shape[1] + 2 * pads[1]) // stridesy + 1
     C = tensor.shape[2] 
 
     firstpad = (pads[0], pads[1])
