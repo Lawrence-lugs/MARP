@@ -385,7 +385,7 @@ def from_QLinearConv(onnx_model,onnx_node,channel_minor=False, qparams=None):
         zp_y = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[7])).astype(np.int32)
 
         kernel = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[3])).astype(np.int32)
-        biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(np.int32)
+        biases = nphelp.to_array(get_initializer_by_name(onnx_model,onnx_node.input[8])).astype(np.int32) if len(onnx_node.input) > 8 else np.zeros(kernel.shape[1],dtype=np.int32)
         strides = get_attribute_by_name('strides',onnx_node.attribute).ints[0]
         group = get_attribute_by_name('group',onnx_node.attribute).i
 

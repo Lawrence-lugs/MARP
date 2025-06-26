@@ -66,7 +66,7 @@ class QuantizedTensor:
             # self.scale = 2*max(clip_high,clip_low) / (2**precision - 1)
             self.scale = 2*max(clip_high,clip_low) / (2**precision - 1)
             if zero_point is None:
-                if not signed: 
+                if not signed:  
                     self.zero_point = 2 ** (precision - 1) - 1
                 self.zero_point = 0
             else:

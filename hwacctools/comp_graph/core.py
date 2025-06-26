@@ -179,6 +179,19 @@ def check_if_depthwise(nx_node : onnx.NodeProto) -> bool:
     groups = onnx.helper.get_attribute_value(groups_attr) if groups_attr else 1
     return groups > 1
 
+def _get_overall_scale_factors(w_scale, x_scale, y_scale, length):
+    '''
+    Computes the overall scale factor for a QLinearConv or QLinearMatMul node
+    '''
+    scale = (w_scale * x_scale) / y_scale  
+
+    if scale.ndim == 0:
+        return np.full((length,), scale, dtype=np.float32)
+    elif len(scale) == 1:
+        return np.full((length,), scale[0], dtype=np.float32)
+    elif len(scale) == length:
+        return scale.astype(np.float32)
+
 class MappedQRAccNode(object):
     '''
     Represents a QRAcc mapped ONNX QLinearConv or QLinearMatmul node with its matrix shape and ID
@@ -225,7 +238,14 @@ class MappedQRAccNode(object):
         if np.isscalar(self.biases):
             self.biases = np.full((self.kernel.shape[0],), self.biases, dtype=np.int32)
 
-        self.scale = self.x_scale * self.w_scale / self.y_scale
+        self.scale = _get_overall_scale_factors(
+            self.w_scale, 
+            self.x_scale, 
+            self.y_scale, 
+            self.kernel.shape[0]
+        ).astype(np.float32)
+        
+        return
 
     def __repr__(self):
         return f"MappedQRAccNode(id={self.node_id}, name={self.name}, type={self.type}, bin_id={self.bin_id}, shape={self.matrix.shape}, depthwise={self.depthwise})"
