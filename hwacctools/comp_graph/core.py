@@ -243,9 +243,20 @@ class MappedQRAccNode(object):
             self.x_scale, 
             self.y_scale, 
             self.kernel.shape[0]
-        ).astype(np.float32)
-        
+        ).astype(np.float32)        
+
+        self.nx_model = nx_model # I hope this passes as a reference and not a copy
+
         return
+    
+    def get_true_inputs(self):
+        '''
+        Returns the true inputs of the mapped node, excluding the weights and biases.
+        '''
+        # Get all initializer names in the model
+        init_names = {i.name for i in self.nx_model.graph.initializer}
+        # Return inputs that are not initializers
+        return [input for input in self.nx_node.input if input not in init_names]
 
     def __repr__(self):
         attrs = [
