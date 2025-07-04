@@ -6,6 +6,7 @@ from matplotlib import patches
 import os
 from tqdm import tqdm
 from PIL import Image
+import numpy as np
 
 def plot_packing_efficient(packer, tile_count_h = 6, filepath=None, name = None, **kwargs):
     '''
@@ -16,10 +17,17 @@ def plot_packing_efficient(packer, tile_count_h = 6, filepath=None, name = None,
         "#FFABAB", "#FFC3A0", "#D5AAFF", "#C2F0C2", "#B2B2B2"
     ]
 
-    n_subplot_cols = tile_count_h
-    n_subplot_rows = (len(packer) + n_subplot_cols - 1) // n_subplot_cols
+    if len(packer) > tile_count_h:
+        n_subplot_cols = tile_count_h
+        n_subplot_rows = (len(packer) + n_subplot_cols - 1) // n_subplot_cols
+    else:
+        n_subplot_cols = np.sqrt(len(packer)).astype(int)
+        n_subplot_rows = np.ceil(len(packer) / n_subplot_cols).astype(int)
 
     fig, axs = plt.subplots(n_subplot_cols, n_subplot_rows, figsize=(9, 9))
+    if n_subplot_rows == 1 and n_subplot_cols == 1:
+        axs = np.array([[axs]])
+
     for index,abin in enumerate(packer):
         # print each rectangle inside packed bin in a plot
         
@@ -200,6 +208,53 @@ def combine_bin_pictures(name : str,
         result.paste(img, (tile_x * tile_dim[0], tile_y * tile_dim[1] ))
 
     result.save(name + '.png')
+
+class NaiveRectpackPacker(object):
+    '''
+    Naive rectpack packer that packs one rectangle in each bin.
+    For example, if you have 10 rectangles, it will create 10 bins
+    with one rectangle each. This class mimics the behavior of a
+    rectpack.Packer object.
+    '''
+    def __init__(self, bin_width, bin_height, rotation=True):
+        self.bin_width = bin_width
+        self.bin_height = bin_height
+        self._rectangles = []
+        self._bins = []
+        self.rotation = rotation
+
+    def add_rect(self, width, height, rid=None):
+        self._rectangles.append({'width': width, 'height': height, 'rid': rid})
+
+    def add_bin(self, width, height, count=1):
+        # This packer's logic is one rect per bin, so bin size is set at init.
+        # This method is for API compatibility.
+        pass
+
+    def pack(self):
+        self._bins = []
+        for i, r in enumerate(self._rectangles):
+            # Create a new packer and bin for each rectangle
+            p = rectpack.newPacker(rotation=self.rotation)
+            p.add_bin(self.bin_width, self.bin_height)
+            p.add_rect(r['width'], r['height'], rid=r['rid'])
+            p.pack()
+            
+            # There will be exactly one bin, and one rectangle in it.
+            if len(p) > 0:
+                self._bins.append(p[0])
+
+    def rect_list(self):
+        return self._rectangles
+
+    def __iter__(self):
+        return iter(self._bins)
+
+    def __getitem__(self, key):
+        return self._bins[key]
+
+    def __len__(self):
+        return len(self._bins)
 
 #%%
 

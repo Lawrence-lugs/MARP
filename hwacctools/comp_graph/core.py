@@ -285,6 +285,7 @@ class NxModelMapping(object):
                  imc_core_size : tuple[int] = (256, 256),
                  dwc_core_size : int = 32,
                  packer = None,
+                 naive = False,
                  **kwargs
                  ):
         
@@ -292,6 +293,8 @@ class NxModelMapping(object):
         nx_shapes, nid_to_name = _get_aimc_mapped_shapes_from_onnx(nx_model)
 
         if packer is None: packer = rectpack.newPacker(mode=rectpack.PackingMode.Offline, rotation=False, pack_algo=rectpack.MaxRectsBssf)
+
+        if naive: packer = pu.NaiveRectpackPacker(imc_core_size[0], imc_core_size[1], rotation=False)
 
         packer = pack_shapes_into_coresize_bins(packer, nx_shapes, imc_core_size)
         check_packing_success(packer, nx_shapes)

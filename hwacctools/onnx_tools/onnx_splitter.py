@@ -419,8 +419,17 @@ def split_qlinearmatmul_node(graph, node, K_max=None, C_max=None, prefix="split_
     # QLinearMatMul: [A, A_scale, A_zero, B, B_scale, B_zero, Y_scale, Y_zero]
     A_name = node.input[0]
     B_name = node.input[3]
+    B_scale_name = node.input[4]
+    B_zp_name = node.input[5]
+
     B_init = next(i for i in graph.initializer if i.name == B_name)
+    B_scale_init = next(i for i in graph.initializer if i.name == B_scale_name)
+    B_zp_init = next(i for i in graph.initializer if i.name == B_zp_name)
+
     B = numpy_helper.to_array(B_init)
+    B_scale = numpy_helper.to_array(B_scale_init)
+    B_zp = numpy_helper.to_array(B_zp_init)
+
     # Assume B shape: (K, N) or (K,) for 1D
     if B.ndim == 1:
         B = B.reshape(-1, 1)
@@ -439,6 +448,23 @@ def split_qlinearmatmul_node(graph, node, K_max=None, C_max=None, prefix="split_
     ]
 
     for c_idx, (c_start, c_end) in enumerate(C_chunks):
+        # Slice B_scale and B_zp if they are per-column (N-dim)
+        if B_scale.ndim == 1 and len(B_scale) == N_dim:
+            B_scale_split = B_scale[c_start:c_end]
+            b_scale_split_name = f"{prefix}_b_scale_{c_idx}"
+            b_scale_split_init = numpy_helper.from_array(B_scale_split, name=b_scale_split_name)
+            new_inits.append(b_scale_split_init)
+        else:
+            b_scale_split_name = B_scale_name
+
+        if B_zp.ndim == 1 and len(B_zp) == N_dim:
+            B_zp_split = B_zp[c_start:c_end]
+            b_zp_split_name = f"{prefix}_b_zp_{c_idx}"
+            b_zp_split_init = numpy_helper.from_array(B_zp_split, name=b_zp_split_name)
+            new_inits.append(b_zp_split_init)
+        else:
+            b_zp_split_name = B_zp_name
+
         out_names_k = []
         for k_idx, (k_start, k_end) in enumerate(K_chunks):
             # Slice B
@@ -475,6 +501,8 @@ def split_qlinearmatmul_node(graph, node, K_max=None, C_max=None, prefix="split_
             inputs = list(node.input)
             inputs[0] = a_input
             inputs[3] = b_split_name
+            inputs[4] = b_scale_split_name
+            inputs[5] = b_zp_split_name
             out_name = f"{prefix}_out_{c_idx}_{k_idx}"
             out_names_k.append(out_name)
             matmul_node = helper.make_node(
@@ -487,21 +515,22 @@ def split_qlinearmatmul_node(graph, node, K_max=None, C_max=None, prefix="split_
 
         # If K was split, sum the outputs for this C chunk
         sum_out = out_names_k[0]
-        for i in range(1, len(out_names_k)):
-            add_out = f"{prefix}_add_{c_idx}_{i}"
-            qadd_node = helper.make_node(
-                "QLinearAdd",
-                inputs=[
-                    sum_out, node.input[6], node.input[7],
-                    out_names_k[i], node.input[6], node.input[7],
-                    node.input[6], node.input[7],
-                ],
-                outputs=[add_out],
-                name=f"{prefix}_qadd_{c_idx}_{i}",
-                domain="com.microsoft"
-            )
-            new_nodes.append(qadd_node)
-            sum_out = add_out
+        if len(out_names_k) > 1:
+            for i in range(1, len(out_names_k)):
+                add_out = f"{prefix}_add_{c_idx}_{i}"
+                qadd_node = helper.make_node(
+                    "QLinearAdd",
+                    inputs=[
+                        sum_out, node.input[6], node.input[7],
+                        out_names_k[i], node.input[6], node.input[7],
+                        node.input[6], node.input[7],
+                    ],
+                    outputs=[add_out],
+                    name=f"{prefix}_qadd_{c_idx}_{i}",
+                    domain="com.microsoft"
+                )
+                new_nodes.append(qadd_node)
+                sum_out = add_out
         out_names.append(sum_out)
 
     # If C was split, concatenate the outputs along the last axis
