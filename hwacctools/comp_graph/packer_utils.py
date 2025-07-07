@@ -8,6 +8,53 @@ from tqdm import tqdm
 from PIL import Image
 import numpy as np
 
+def get_packer(naive : bool, offline : bool, bin_algo : str, pack_algo : str, sort_algo : str, core_size : tuple = None):
+
+    bin_algo_map = {
+        'BBF': rectpack.PackingBin.BBF,
+        'BFF': rectpack.PackingBin.BFF,
+        'BNF': rectpack.PackingBin.BNF
+    }
+    pack_algo_map = {
+        'MaxRectsBssf': rectpack.MaxRectsBssf,
+        'MaxRectsBaf': rectpack.MaxRectsBaf,
+        'SkylineBlWm': rectpack.SkylineBlWm
+    }
+    sort_algo_map = {
+        'SORT_AREA': rectpack.SORT_AREA,
+        'SORT_PERI': rectpack.SORT_PERI,
+        'SORT_DIFF': rectpack.SORT_DIFF,
+        'SORT_SSIDE': rectpack.SORT_SSIDE,
+        'SORT_LSIDE': rectpack.SORT_LSIDE,
+        'SORT_RATIO': rectpack.SORT_RATIO,
+        'SORT_NONE': rectpack.SORT_NONE
+    }
+    mode = rectpack.PackingMode.Online if not offline else rectpack.PackingMode.Offline
+
+    bin_algo_list = list(bin_algo_map.keys())
+    pack_algo_list = list(pack_algo_map.keys())
+    sort_algo_list = list(sort_algo_map.keys())
+
+    if bin_algo not in bin_algo_list:
+        raise ValueError(f"Invalid bin_algo: {bin_algo}. Must be one of {bin_algo_list}")
+    if pack_algo not in pack_algo_list:
+        raise ValueError(f"Invalid pack_algo: {pack_algo}. Must be one of {pack_algo_list}")
+    if sort_algo not in sort_algo_list: 
+        raise ValueError(f"Invalid sort_algo: {sort_algo}. Must be one of {sort_algo_list}")
+    
+    if naive and core_size is not None:
+        return NaiveRectpackPacker(core_size[0], core_size[1], rotation=False)
+    elif naive:
+        return NaiveRectpackPacker(256, 256, rotation=False)
+
+    return rectpack.newPacker(
+        bin_algo=bin_algo_map[bin_algo],
+        pack_algo=pack_algo_map[pack_algo],
+        sort_algo=sort_algo_map[sort_algo],
+        rotation=False,
+        mode=mode
+    )
+
 def plot_packing_efficient(packer, tile_count_h = 6, filepath=None, name = None, **kwargs):
     '''
     Plots the packed bins in a grid layout with pastel colors.

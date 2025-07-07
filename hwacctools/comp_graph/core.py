@@ -79,17 +79,22 @@ def check_packing_success(packer, shapes):
     with the number of shapes.
     '''
     if len(packer.rect_list()) != len(shapes):
-        print(f'Packing incomplete: packed {len(packer.rect_list())} vs {len(shapes)} matrices in cgraph')
+        # print(f'Packing incomplete: packed {len(packer.rect_list())} vs {len(shapes)} matrices in cgraph')
         return False
     else:
-        print(f'Packing successful: packed {len(packer.rect_list())} vs {len(shapes)} matrices in cgraph in {len(packer)} bins')
+        # print(f'Packing successful: packed {len(packer.rect_list())} vs {len(shapes)} matrices in cgraph in {len(packer)} bins')
         return True
     
 def pack_shapes_into_coresize_bins(packer, shapes, imc_core_size):
 
     packer.add_bin(*imc_core_size,count=float("inf"))
     packer = add_rects_to_packer(packer,shapes)
-    packer.pack()
+
+    try:
+        packer.pack()
+    except:
+        # print(f'Skipping packing, maybe an online packer?')
+        pass
 
     return packer
 
@@ -297,7 +302,7 @@ class NxModelMapping(object):
         if naive: packer = pu.NaiveRectpackPacker(imc_core_size[0], imc_core_size[1], rotation=False)
 
         packer = pack_shapes_into_coresize_bins(packer, nx_shapes, imc_core_size)
-        check_packing_success(packer, nx_shapes)
+        self.success = check_packing_success(packer, nx_shapes)
 
         self.nid_to_name = nid_to_name
         self.nbins = len(packer)
@@ -315,6 +320,12 @@ class NxModelMapping(object):
         self.mapped_nodes = sorted(self.mapped_nodes, key=lambda node: node.node_id)
 
         return
+    
+    def __bool__(self):
+        '''
+        Returns True if the packing was successful
+        '''
+        return self.success
     
     def _setup_mapping_of_depthwise_nodes(self):
 
@@ -493,7 +504,7 @@ class QRAccModel(object):
     Analytical model of a qracc accelerator
     '''
     def __init__(self,
-                 packed_cgraph : packed_model,
+                 packed_cgraph : NxModelMapping,
                  num_cores = 1
                  ):
         
@@ -512,7 +523,7 @@ class QRAccModel(object):
             for rect in bin:
                 total_matrix_area += rect.width * rect.height
 
-        total_core_area = len(self.packed_cgraph.packer) * 256 * 256
+        total_core_area = len(self.packed_cgraph.packer) * np.prod(self.packed_cgraph.core_size)
 
         self.utilization = total_matrix_area / total_core_area
 
@@ -527,13 +538,11 @@ class QRAccModel(object):
         # create dictionary of write number vs bin ID written
         write_list = {i+1:0 for i in range(len(self.packed_cgraph.packer))}
 
-        for matshape in self.packed_cgraph.cgraph_shapes:
+        for u_mapped_node in self.packed_cgraph.mapped_nodes:
             # get the bin that this matshape is in
-            bin_id = self.packed_cgraph.find_bin_of_id(matshape[2])
+            bin_id = u_mapped_node.bin_id
             if bin_id is None:
-                raise ValueError(f"Matshape {matshape} not found in packed model bins")
-
-            # print(f'accessing bin {bin_id}:{current_bins}, {bin_uses}')
+                continue
             
             if bin_id not in current_bins.values():
                 lfu_bin = min(bin_uses, key=bin_uses.get)
@@ -591,6 +600,11 @@ class QRAccModel(object):
         ax.set_xlabel("Write ID") 
         ax.set_ylabel("Bin ID")
         ax.set_title(f"{name}")
+
+        # Make sure the y-axis and x-axis are integer ticks
+        # ax.set_xticks(list(write_list.keys()))
+        # ax.set_yticks(list(set(write_list.values())))
+
         return ax
 
     def simulate_inference(self):
