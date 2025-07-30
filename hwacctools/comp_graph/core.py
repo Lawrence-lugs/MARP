@@ -301,6 +301,8 @@ class NxModelMapping(object):
 
         if naive: packer = pu.NaiveRectpackPacker(imc_core_size[0], imc_core_size[1], rotation=False)
 
+        # print(f'packer is {packer}')
+
         packer = pack_shapes_into_coresize_bins(packer, nx_shapes, imc_core_size)
         self.success = check_packing_success(packer, nx_shapes)
 
@@ -396,12 +398,12 @@ class NxModelMapping(object):
             return None
         return self.mapped_bins[mapped_node.bin_id] 
 
-    def plot(self, bin = None, filepath = None, name = None):
+    def plot(self, bin = None, filepath = None, name = None, ax=None):
         '''
         Plots the packed model as a grid of rectangles
         '''
 
-        pu.plot_packing_efficient(self.packer,filepath=filepath, name=name)
+        pu.plot_packing_efficient(self.packer,filepath=filepath, name=name, ax=ax)
         return
     
     def __repr__(self):
