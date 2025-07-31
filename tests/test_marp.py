@@ -8,6 +8,7 @@ import matplotlib
 import os
 matplotlib.use('Agg')  # Use non-interactive backend for testing
 import matplotlib.pyplot as plt
+from marp.compile import compile
 
 @pytest.fixture(params=[
     'onnx_models/ad_quantized_int8.onnx',
@@ -65,3 +66,35 @@ def test_plot_marp_save_to_file(u_marped, modelpath, packerName):
     output_file = os.path.join(output_dir, filename)
     u_marped.plot(filepath=output_file)
     assert os.path.exists(output_file)  # Check that file was created
+
+@pytest.mark.parametrize("modelpath", [
+    'onnx_models/mbv2_cifar10_int8.onnx',
+    'onnx_models/ad_quantized_int8.onnx',
+    'onnx_models/ks_quantized_int8.onnx',
+    'onnx_models/ic_quantized_int8.onnx'
+])
+@pytest.mark.parametrize("packerName", [
+    'Naive',
+    'Dense',
+    'Balanced',
+    'WriteOptimized'
+])
+def test_traverse_and_compile_nx_graph(modelpath, packerName):
+    nx_model = onnx.load(modelpath)
+    packer = pu.get_packer_by_type(packerName)
+    input_name = nx_model.graph.input[0].name
+    input_shape = [d.dim_value for d in nx_model.graph.input[0].type.tensor_type.shape.dim]
+    if input_shape[0] > 1:
+        nx_model.graph.input[0].type.tensor_type.shape.dim[0].dim_value = 1
+        input_shape[0] = 1
+    input_dict = {
+        input_name: np.random.rand(*input_shape).astype(np.float32)
+    }
+    commands = compile.traverse_and_compile_nx_graph(
+        nx_model      = nx_model,
+        input_dict    = input_dict,
+        imc_core_size = (256, 256),
+        dwc_core_size = 32,
+        packer        = packer
+    )
+    assert commands != []  # Ensure commands were generated
