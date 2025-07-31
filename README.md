@@ -1,65 +1,127 @@
-# AI Accelerator Design Garage
+# MARP
 
-Various functions and resources to help in designing accelerators
+We build MARP on the idea of using rectangular bin ### Key Components
 
-## How to use
+- **`marp/`**: The core library implementing the MARP algorithm with modules for compilation, mapping, ONNX processing, and quantization
+- **`marp_results.ipynb`**: Interactive notebook containing all experiments and results from the paper
+- **`onnx_models/`**: Collection of quantized models used in experiments (AD: Anomaly Detection, IC: Image Classification, KS: Keyword Spotting, MBV2: MobileNetV2)
+- **`images/`**: Visualization results showing different packing strategies and performance comparisons
+- **`tests/`**: Comprehensive test suite for validating MARP functionality
+
+## Testing with pytest
+
+MARP uses pytest for comprehensive testing to ensure the reliability and correctness of all core components.
+
+### Test Structure
+
+The test suite is organized as follows:
+
+- **`tests/test_marp.py`**: Main test module covering core MARP functionality
+
+### Test Coverage
+
+The test suite covers the following key areas:
+
+1. **Model Loading and Processing**: Tests for ONNX model loading, quantization, and preprocessing
+2. **Packing Algorithms**: Comprehensive testing of all four packing strategies:
+   - Naive packing
+   - Dense packing 
+   - Balanced packing
+   - WriteOptimized packing
+3. **Computation Graph Operations**: Layer mapping, graph splitting, and optimization
+4. **ONNX Tools**: Model manipulation, layer extraction, and quantization utilities
+5. **Integration Tests**: End-to-end testing with real models (AD, IC, KS, MBV2)
+
+### Running Tests
+
+To run the complete test suite:
+
+```bash
+# Run all tests
+pytest
+
+# Run with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_marp.py
+
+# Run with coverage report
+pytest --cov=marp --cov-report=html
+
+# Run tests for specific functionality
+pytest -k "packing" -v  # Run only packing-related tests
+```
+
+### Test Fixtures
+
+The test suite uses parametrized fixtures to ensure comprehensive coverage:
+
+- **Model fixtures**: Tests run against multiple model types (AD, IC, KS, MBV2)
+- **Packer fixtures**: All packing strategies are tested systematically
+- **Configuration fixtures**: Various hardware and mapping configurations
+
+This approach ensures that each combination of model and packing strategy is thoroughly validated, providing confidence in MARP's reliability across different use cases. algorithms to pack multiple DNN layers into a single matrix written into the AIMC. MARP reduces the number of AIMC cores needed to fully map models OR reduces the number of weight writes onto AIMC memory needed in a full model inference. 
+
+## Reproducing results
+
+To reproduce the reported results, proceed to `marp_results.ipynb`
+
+
+
+## Project Structure
 
 ```
-git clone https://github.com/Lawrence-lugs/hwacc_design_garage.git
-cd hwacc_design_garage
-pip install -e .
+hwacc_design_garage/
+├── README.md                   # Project documentation
+├── environment.yml             # Conda environment configuration
+├── marp_results.ipynb         # Main results notebook for reproducing experiments
+├── naive_mlperftiny.csv       # MLPerf Tiny benchmark results (naive approach)
+├── packing_vs_ncores.csv      # Performance comparison data
+│
+├── marp/                      # Core MARP library
+│   ├── compile/               # Compilation and compute modules
+│   │   ├── compile.py         # Main compilation logic
+│   │   ├── compute.py         # Computation utilities
+│   │   └── stimulus_gen.py    # Test stimulus generation
+│   │
+│   ├── mapping/               # Layer mapping and packing algorithms
+│   │   ├── __init__.py
+│   │   ├── core.py            # Core mapping functionality
+│   │   └── packer_utils.py    # Bin packing utilities
+│   │
+│   ├── onnx_tools/            # ONNX model processing tools
+│   │   ├── onnx_splitter.py   # ONNX model layer splitting
+│   │   └── onnx_utils.py      # ONNX utility functions
+│   │
+│   └── quantization/          # Model quantization tools
+│       └── quant.py           # Quantization implementation
+│
+├── onnx_models/               # Pre-trained and processed ONNX models
+│   ├── ad_*.onnx             # Anomaly Detection models
+│   ├── ic_*.onnx             # Image Classification models
+│   ├── ks_*.onnx             # Keyword Spotting models
+│   └── mbv2_*.onnx           # MobileNetV2 variants
+│
+├── images/                    # Results visualizations and test images
+│   ├── *_Balanced.png        # Balanced packing strategy results
+│   ├── *_Dense.png           # Dense packing strategy results
+│   ├── *_Naive.png           # Naive mapping results
+│   ├── *_WriteOptimized.png  # Write-optimized strategy results
+│   ├── bin_packing.png       # Bin packing visualization
+│   └── test images (*.jpg, *.jpeg)
+│
+└── tests/                     # Test suite
+    ├── __init__.py
+    ├── conftest.py           # pytest configuration
+    └── test_*.py             # Test modules
 ```
 
-## Quantization: Bundle of tools for quantized linear algebra calculations and testing
+### Key Components
 
-```python
-import hwacctools.quantization.quant as q
+- **`marp/`**: The core library implementing the MARP algorithm with modules for compilation, mapping, ONNX processing, and quantization
+- **`marp_results.ipynb`**: Interactive notebook containing all experiments and results from the paper
+- **`onnx_models/`**: Collection of quantized models used in experiments (AD: Anomaly Detection, IC: Image Classification, KS: Keyword Spotting, MBV2: MobileNetV2)
+- **`images/`**: Visualization results showing different packing strategies and performance comparisons, but also image inputs for the onnx models.
+- **`tests/`**: Comprehensive test suite for validating MARP functionality
 
-m0, shift = q.convert_scale_to_shift_and_m0(0.019110053777694702)
-fp_int = q.convert_to_fixed_point_int(m0,16)
-print((m0 * 2**(shift)) - (fp_int * 2**(shift-16))) # == 0
-print((m0 * 2**(shift))) # Within 10^-7 of scale
-```
-
-## Comp Graph
-
-Turns ONNX to nodes that contain numpy arrays. The filesize blows up, and it becomes much slower, but they're easier to work with for turning into test inputs for verilog testbenches.
-
-```python
-from hwacctools.comp_graph import splitter, cnodes, cgraph
-import onnx
-import numpy as np
-from torchvision import transforms
-from PIL import Image
-
-modelpath = 'onnx_models/mobilenetv2-12-int8.onnx'
-# modelpath = 'onnx_models/mbv2_main.onnx'
-
-nx_model = onnx.load(modelpath)
-img = Image.open('images/imagenet_finch.jpeg')
-img_tensor = transforms.ToTensor()(img).float()
-img_tensor = transforms.CenterCrop(32)(img_tensor)
-# tensor_input = img_tensor.unsqueeze()
-img_array = np.array(img_tensor)
-
-input_dict = {
-    'input':img_array
-}
-
-cgraph_UUT = cgraph.Cgraph.from_onnx_model(nx_model)
-out = cgraph_UUT.forward(input_dict)
-```
-
-## Bin Packing
-
-Utilities for applying rectangular bin packing algorithms on the computational graphs.
-(Most of the actual implementation is inside comp_graph/core at the moment)
-
-![Sample](images/bin_packing.png)
-
-## Requirements
-
-Two options: `pip install` the requirements or
-`conda env create -f env.yml`.
-
-The latter will download everything, but you may only want some subfolders, so I recommend just installing as you go along.

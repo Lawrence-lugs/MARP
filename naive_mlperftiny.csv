@@ -1,9 +1,9 @@
 Model,Packer,Utilization,Bin Writes,# Bins,Marker,Color
-DS-CNN,Naive,0.0501302083333333,7,6,*,red
+DS-CNN,Naive,0.050130208333333336,7,6,*,red
 DS-CNN,Dense,0.30078125,2,1,o,
 DS-CNN,Balanced,0.30078125,2,1,o,
 DS-CNN,WriteOptimized,0.30078125,2,1,o,
-FC-AE,Naive,0.2879464285714285,15,14,*,red
+FC-AE,Naive,0.28794642857142855,15,14,*,red
 FC-AE,Dense,0.80625,7,5,o,
 FC-AE,Balanced,0.80625,7,5,o,
 FC-AE,WriteOptimized,0.80625,6,5,o,
@@ -11,7 +11,7 @@ MBV2,Naive,0.3585540436126374,92,91,*,red
 MBV2,Dense,0.81571044921875,71,40,o,
 MBV2,Balanced,0.81571044921875,71,40,o,
 MBV2,WriteOptimized,0.6156305277122641,54,53,o,
-ResNet,Naive,0.0995279947916666,16,15,*,red
+ResNet,Naive,0.09952799479166667,16,15,*,red
 ResNet,Dense,0.7464599609375,6,2,o,
 ResNet,Balanced,0.7464599609375,6,2,o,
 ResNet,WriteOptimized,0.7464599609375,3,2,o,
