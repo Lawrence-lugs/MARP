@@ -1,6 +1,9 @@
 # MARP
 
-We build MARP on the idea of using rectangular bin ### Key Components
+I build MARP on the idea of using rectangular bin packing to allow the reuse of data written onto AIMC arrays between layers.
+MARP is a subset of the functionalities in the [hardware accelerator design garage](https://github.com/Lawrence-lugs/hwacc_design_garage).
+
+### Key Components
 
 - **`marp/`**: The core library implementing the MARP algorithm with modules for compilation, mapping, ONNX processing, and quantization
 - **`marp_results.ipynb`**: Interactive notebook containing all experiments and results from the paper
@@ -20,17 +23,10 @@ The test suite is organized as follows:
 
 ### Test Coverage
 
-The test suite covers the following key areas:
+The tests cover
 
-1. **Model Loading and Processing**: Tests for ONNX model loading, quantization, and preprocessing
-2. **Packing Algorithms**: Comprehensive testing of all four packing strategies:
-   - Naive packing
-   - Dense packing 
-   - Balanced packing
-   - WriteOptimized packing
-3. **Computation Graph Operations**: Layer mapping, graph splitting, and optimization
-4. **ONNX Tools**: Model manipulation, layer extraction, and quantization utilities
-5. **Integration Tests**: End-to-end testing with real models (AD, IC, KS, MBV2)
+1. MARP packing with the 4 models in `onnx_models` with the representative 4 packer types (Naive, Dense, Balanced, WriteOptimized)
+2. MARP compilation of the 4 models in `onnx_models` with the representative 4 packer types (Naive, Dense, Balanced, WriteOptimized)
 
 ### Running Tests
 
@@ -39,18 +35,6 @@ To run the complete test suite:
 ```bash
 # Run all tests
 pytest
-
-# Run with verbose output
-pytest -v
-
-# Run specific test file
-pytest tests/test_marp.py
-
-# Run with coverage report
-pytest --cov=marp --cov-report=html
-
-# Run tests for specific functionality
-pytest -k "packing" -v  # Run only packing-related tests
 ```
 
 ### Test Fixtures
@@ -66,8 +50,6 @@ This approach ensures that each combination of model and packing strategy is tho
 ## Reproducing results
 
 To reproduce the reported results, proceed to `marp_results.ipynb`
-
-
 
 ## Project Structure
 
