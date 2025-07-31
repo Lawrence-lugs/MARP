@@ -290,7 +290,7 @@ class NaiveRectpackPacker(object):
     with one rectangle each. This class mimics the behavior of a
     rectpack.Packer object.
     '''
-    def __init__(self, bin_width, bin_height, rotation=True):
+    def __init__(self, bin_width, bin_height, rotation=False):
         self.bin_width = bin_width
         self.bin_height = bin_height
         self._rectangles = []

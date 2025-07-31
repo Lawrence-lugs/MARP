@@ -652,8 +652,8 @@ def topological_sort_onnx_graph(graph):
                 if in_degree[consumer.name] == 0:
                     ready.append(consumer)
 
-    # if len(sorted_nodes) != len(graph.node):
-    #     raise RuntimeError("Graph has cycles or disconnected nodes!")
+    if len(sorted_nodes) != len(graph.node):
+        raise RuntimeError("Graph has cycles or disconnected nodes!")
 
     graph.ClearField('node')
     graph.node.extend(sorted_nodes)
