@@ -11,7 +11,7 @@ class QrAccNodeCode(object):
     Mappings and reference output attributes are NCHW
     '''
 
-    def __init__(self, mapped_node : core.MappedQRAccNode, mapped_bin : core.MappedBin, ifmap, imc_core_size = (256,256), ws_core_size = 32, ifmap_bits = 8, ofmap_bits = 8, nx_model : onnx.ModelProto = None):
+    def __init__(self, mapped_node : core.MappedNode, mapped_bin : core.MappedBin, ifmap, imc_core_size = (256,256), ws_core_size = 32, ifmap_bits = 8, ofmap_bits = 8, nx_model : onnx.ModelProto = None):
 
         self.ifmap = ifmap if ifmap.ndim == 4 else ifmap.reshape((1, -1, 1, 1))
 
@@ -144,7 +144,7 @@ class QrAccNodeCode(object):
         
         nx_node, nx_model, ifmap = sample_onnx_qlinearconv(ifmap_shape=ifmap_shape,ifmap_bits=ifmap_bits,kernel_shape=kernel_shape,kernel_bits=kernel_bits,kernel_dtype = np.int8,pads = pads,stride = stride, seed = 0, depthwise = depthwise)
 
-        mapped_node = core.MappedQRAccNode(nx_node, bin_id = 0, mapped_rect=None, nx_model = nx_model, offset_x=offset_x, offset_y = offset_y)
+        mapped_node = core.MappedNode(nx_node, bin_id = 0, mapped_rect=None, nx_model = nx_model, offset_x=offset_x, offset_y = offset_y)
 
         bin_weights = np.zeros(core_size, dtype=np.int8)
         bin_weights[offset_y:offset_y+mapped_node.matrix.shape[0], offset_x:offset_x+mapped_node.matrix.shape[1]] = mapped_node.matrix
@@ -425,7 +425,7 @@ def write_array_to_asm(write_array, address='00000100'):
     return asm
 
 def get_config_from_mapped_node(
-    mapped_node : core.MappedQRAccNode,
+    mapped_node : core.MappedNode,
     ifmap_shape : tuple,
     ifmap_bits = 8,
     ofmap_bits = 8

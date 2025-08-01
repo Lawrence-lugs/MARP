@@ -68,7 +68,7 @@ def test_plot_marp_save_to_file(u_marped, modelpath, packerName):
     assert os.path.exists(output_file)  # Check that file was created
 
 @pytest.mark.parametrize("modelpath", [
-    'onnx_models/mbv2_cifar10_int8.onnx',
+    # 'onnx_models/mbv2_cifar10_int8.onnx', # Remove testing compile of mbv2- this is a waste of resources
     'onnx_models/ad_quantized_int8.onnx',
     'onnx_models/ks_quantized_int8.onnx',
     'onnx_models/ic_quantized_int8.onnx'

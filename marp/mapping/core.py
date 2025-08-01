@@ -196,7 +196,7 @@ class MappedBin(object):
         plt.title(f"Bin {self.bin_id}")
         return f"MappedBin(id={self.bin_id}, shape={self.weights.shape})"
 
-class MappedQRAccNode(object):
+class MappedNode(object):
     '''
     Represents a QRAcc mapped ONNX QLinearConv or QLinearMatmul node with its matrix shape and ID
     '''
@@ -336,7 +336,7 @@ class NxModelMapping(object):
                 groups = onnx.helper.get_attribute_value(groups_attr) if groups_attr else 1
                 if groups > 1:
                     # This is a depthwise convolution, just generate a MappedQRAccNode for it
-                    mapped_node = MappedQRAccNode(
+                    mapped_node = MappedNode(
                         nx_node = node, 
                         bin_id = None,  # Depthwise nodes are not packed
                         mapped_rect = None,  # No rectangle for depthwise nodes
@@ -358,7 +358,7 @@ class NxModelMapping(object):
                 nx_node = self.nx_model.graph.node[mapped_rect.rid]
 
                 # Attach mapping information to the node
-                mapped_node = MappedQRAccNode(
+                mapped_node = MappedNode(
                     nx_node = nx_node, 
                     bin_id = bin_id, 
                     mapped_rect = mapped_rect, 
