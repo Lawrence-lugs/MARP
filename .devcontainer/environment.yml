@@ -1,0 +1,33 @@
+name: marp
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.11
+  # Scientific computing
+  - numpy
+  - scipy
+  - pandas
+  - statsmodels
+  # Visualisation
+  - matplotlib
+  - seaborn
+  - pillow
+  # ML / DL
+  - pytorch::pytorch
+  - pytorch::torchvision
+  - pytorch::cpuonly
+  - onnxruntime
+  # Utilities
+  - tqdm
+  - fsspec
+  # Testing & notebook
+  - pytest
+  - ipykernel
+  - pip
+  - pip:
+      - onnx==1.15.0
+      - protobuf==3.20.3
+      - rectpack==0.2.2
+      - sty==1.0.6
+      - nobuco==0.11.5
