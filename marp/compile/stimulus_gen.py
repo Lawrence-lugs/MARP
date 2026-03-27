@@ -12,7 +12,7 @@ def _hex_but_no_0x(x):
     return hex(x)[2:]
 
 def _hex3(n,hexits=8):
-    return "%s"%("00000000%x"%(n&0xffffffff))[-hexits:]
+    return f"{(int(n) & 0xffffffff):08x}"[-hexits:]
 
 hex_but_no_0x = np.vectorize(_hex3)
 vhex3 = np.vectorize(_hex3)
@@ -26,7 +26,7 @@ def kernel_to_writes(kernel, channels, hexes=True):
     ''' 
     kernel_flat = kernel.reshape(-1, channels)
     kernel_flat = np.pad(kernel_flat, ((0, 0), (0, 4 - (kernel_flat.shape[1] % 4) if kernel_flat.shape[1] % 4 != 0 else 0)), mode='constant', constant_values=0)
-    kernel_flat = kernel_flat.reshape(-1, 4)
+    kernel_flat = kernel_flat.reshape(-1, 4).astype(np.uint8)
     if hexes:
         kernel_packed = vhex3(kernel_flat, hexits=2)
         kernel_writes = []
@@ -298,7 +298,7 @@ def pad_scaler_writes(scale_to_map,core_shape,output_zero_point,mm_offset_x):
     scale[mm_offset_x:mm_offset_x+scales_width] = scale_to_map
     m0, shift = quant.vconvert_scale_to_shift_and_m0(scale, precision=16)
     int_scale = quant.vconvert_to_fixed_point_int(m0,16)
-    scaler_data = output_zero_point * (2**20) + int_scale * (2**4) + (-shift)
+    scaler_data = output_zero_point.astype(int) * (2**20) + int_scale * (2**4) + (-shift)
     return scaler_data
 
 def pad_bias_data(biases_to_map, core_shape, mm_offset_x):

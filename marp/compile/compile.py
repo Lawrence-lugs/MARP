@@ -402,7 +402,7 @@ def bundle_config_into_write(
         ((config_dict['mapped_matrix_offset_x'] & 0xFFFF) << 0)
     )
     padding_word = (
-        ((config_dict['padding_value'] & 0xFFFF) << 4) |
+        ((config_dict['padding_value'].astype(np.uint) & 0xFFFF) << 4) |
         ((config_dict['padding'] & 0xFFFF) << 0)
     )
 
