@@ -25,4 +25,4 @@ jobs:
             -w /workspaces/MARP \
             -e MPLBACKEND=Agg \
             marp-devcontainer:ci \
-            bash -c "pip install -e third_party/zigzag && pip install -e '.[dev]' && pytest tests/"
+            bash -c "git config --global --add safe.directory /workspaces/MARP && pip install -e third_party/zigzag && pip install -e '.[dev]' && pytest tests/"
