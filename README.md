@@ -1,109 +1,108 @@
 # MARP
 
-I build MARP on the idea of using rectangular bin packing to allow the reuse of data written onto AIMC arrays between layers.
+**Mapping Accelerator for Reconfigurable Packing** — rectangular bin-packing algorithms that pack multiple DNN layers into a single weight matrix written onto Analog In-Memory Computing (AIMC) arrays.  MARP reduces the number of AIMC cores needed to fully map models **or** reduces the number of weight writes during a full-model inference.
+
 MARP is a subset of the functionalities in the [hardware accelerator design garage](https://github.com/Lawrence-lugs/hwacc_design_garage).
+
+## Installation
+
+```bash
+# Clone (with ZigZag submodule)
+git clone --recurse-submodules https://github.com/Lawrence-lugs/MARP.git
+cd MARP
+
+# Install ZigZag from submodule, then MARP itself
+pip install -e third_party/zigzag
+pip install -e ".[dev]"
+```
+
+> **Dev Container:** Opening this repo in VS Code with the Dev Containers extension will build and configure everything automatically.
+
+## Quick start
+
+```python
+import onnx
+from marp import NxModelMapping, QRAccModel, get_packer_by_type
+
+nx_model = onnx.load("onnx_models/ad_quantized_int8.onnx")
+packer = get_packer_by_type("Dense")
+mapping = NxModelMapping(nx_model, imc_core_size=(256, 256), packer=packer)
+model = QRAccModel(mapping, num_cores=1)
+
+print(f"Utilisation: {model.utilization:.2%}")
+print(f"Weight writes: {model.weight_bin_writes}")
+```
+
+### ZigZag analytical modelling
+
+```python
+from marp.accelerator.zigzag_bridge import estimate_hardware_performance
+
+result = estimate_hardware_performance(
+    workload="onnx_models/ad_quantized_int8.onnx",
+    accelerator="accelerator_configs/aimc_example.yaml",
+    mapping="accelerator_configs/mapping_example.yaml",
+)
+print(f"Energy: {result['energy']:.2e} pJ  |  Latency: {result['latency']:.0f} cycles")
+```
 
 ### Key Components
 
-- **`marp/`**: The core library implementing the MARP algorithm with modules for compilation, mapping, ONNX processing, and quantization
-- **`marp_results.ipynb`**: Interactive notebook containing all experiments and results from the paper
-- **`onnx_models/`**: Collection of quantized models used in experiments (AD: Anomaly Detection, IC: Image Classification, KS: Keyword Spotting, MBV2: MobileNetV2)
-- **`images/`**: Visualization results showing different packing strategies and performance comparisons
-- **`tests/`**: Comprehensive test suite for validating MARP functionality
+- **`marp/`** — Core library: compilation, mapping, ONNX processing, quantisation, ZigZag bridge
+- **`marp_results.ipynb`** — Interactive notebook reproducing the paper's experiments
+- **`onnx_models/`** — Quantised models (AD, IC, KS, MBV2)
+- **`third_party/zigzag/`** — MICAS ZigZag submodule for analytical accelerator modelling
+- **`tests/`** — pytest suite (4 models × 4 packers × 3 tests)
 
-## Testing with pytest
+## Testing
 
-MARP uses pytest for comprehensive testing to ensure the reliability and correctness of all core components.
-
-### Test Structure
-
-The test suite is organized as follows:
-
-- **`tests/test_marp.py`**: Main test module covering core MARP functionality
+```bash
+pytest                 # run all tests
+pytest -k "test_plot"  # run only plotting tests
+```
 
 ### Test Coverage
 
-The tests cover
-
-1. MARP packing with the 4 models in `onnx_models` with the representative 4 packer types (Naive, Dense, Balanced, WriteOptimized)
-2. MARP compilation of the 4 models in `onnx_models` with the representative 4 packer types (Naive, Dense, Balanced, WriteOptimized)
-
-### Running Tests
-
-To run the complete test suite:
-
-```bash
-# Run all tests
-pytest
-```
-
-### Test Fixtures
-
-The test suite uses parametrized fixtures to ensure comprehensive coverage:
-
-- **Model fixtures**: Tests run against multiple model types (AD, IC, KS, MBV2)
-- **Packer fixtures**: All packing strategies are tested systematically
-- **Configuration fixtures**: Various hardware and mapping configurations
-
-This approach ensures that each combination of model and packing strategy is thoroughly validated, providing confidence in MARP's reliability across different use cases. algorithms to pack multiple DNN layers into a single matrix written into the AIMC. MARP reduces the number of AIMC cores needed to fully map models OR reduces the number of weight writes onto AIMC memory needed in a full model inference. 
+1. MARP packing with 4 models × 4 packer types (Naive, Dense, Balanced, WriteOptimized)
+2. MARP compilation of 3 models × 4 packer types
 
 ## Reproducing results
 
-To reproduce the reported results, proceed to `marp_results.ipynb`
+To reproduce the reported results, proceed to `marp_results.ipynb`.
 
 ## Project Structure
 
 ```
-hwacc_design_garage/
-├── README.md                   # Project documentation
-├── environment.yml             # Conda environment configuration
-├── marp_results.ipynb         # Main results notebook for reproducing experiments
-├── naive_mlperftiny.csv       # MLPerf Tiny benchmark results (naive approach)
-├── packing_vs_ncores.csv      # Performance comparison data
+MARP/
+├── pyproject.toml              # Package definition & dependencies
+├── LICENSE                     # MIT
+├── README.md
+├── marp_results.ipynb          # Results notebook
+├── onnx_models/                # Quantised ONNX models
 │
-├── marp/                      # Core MARP library
-│   ├── compile/               # Compilation and compute modules
-│   │   ├── compile.py         # Main compilation logic
-│   │   ├── compute.py         # Computation utilities
-│   │   └── stimulus_gen.py    # Test stimulus generation
-│   │
-│   ├── mapping/               # Layer mapping and packing algorithms
-│   │   ├── __init__.py
-│   │   ├── core.py            # Core mapping functionality
-│   │   └── packer_utils.py    # Bin packing utilities
-│   │
-│   ├── onnx_tools/            # ONNX model processing tools
-│   │   ├── onnx_splitter.py   # ONNX model layer splitting
-│   │   └── onnx_utils.py      # ONNX utility functions
-│   │
-│   └── quantization/          # Model quantization tools
-│       └── quant.py           # Quantization implementation
+├── marp/                       # Core library (pip-installable)
+│   ├── __init__.py             # Public API re-exports
+│   ├── constants.py            # Hardware constants & Trigger enum
+│   ├── accelerator/            # ZigZag integration layer
+│   │   └── zigzag_bridge.py
+│   ├── compile/                # Assembly generation for QRAcc
+│   │   ├── compile.py
+│   │   ├── compute.py
+│   │   └── stimulus_gen.py
+│   ├── mapping/                # Bin packing & layer→core mapping
+│   │   ├── core.py
+│   │   └── packer_utils.py
+│   ├── onnx_tools/             # ONNX graph surgery
+│   │   ├── onnx_splitter.py
+│   │   └── onnx_utils.py
+│   └── quantization/
+│       └── quant.py
 │
-├── onnx_models/               # Pre-trained and processed ONNX models
-│   ├── ad_*.onnx             # Anomaly Detection models
-│   ├── ic_*.onnx             # Image Classification models
-│   ├── ks_*.onnx             # Keyword Spotting models
-│   └── mbv2_*.onnx           # MobileNetV2 variants
+├── third_party/
+│   └── zigzag/                 # Git submodule (MICAS ZigZag v3)
 │
-├── images/                    # Results visualizations and test images
-│   ├── *_Balanced.png        # Balanced packing strategy results
-│   ├── *_Dense.png           # Dense packing strategy results
-│   ├── *_Naive.png           # Naive mapping results
-│   ├── *_WriteOptimized.png  # Write-optimized strategy results
-│   ├── bin_packing.png       # Bin packing visualization
-│   └── test images (*.jpg, *.jpeg)
-│
-└── tests/                     # Test suite
-    ├── __init__.py
-    ├── conftest.py           # pytest configuration
-    └── test_*.py             # Test modules
+└── tests/
+└── tests/
+    ├── conftest.py             # Fixtures & MODEL_DIR
+    └── test_marp.py            # Parametrised tests
 ```
-
-### Key Components
-
-- **`marp/`**: The core library implementing the MARP algorithm with modules for compilation, mapping, ONNX processing, and quantization
-- **`marp_results.ipynb`**: Interactive notebook containing all experiments and results from the paper
-- **`onnx_models/`**: Collection of quantized models used in experiments (AD: Anomaly Detection, IC: Image Classification, KS: Keyword Spotting, MBV2: MobileNetV2)
-- **`images/`**: Visualization results showing different packing strategies and performance comparisons, but also image inputs for the onnx models.
-- **`tests/`**: Comprehensive test suite for validating MARP functionality
-

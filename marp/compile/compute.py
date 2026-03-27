@@ -1,3 +1,7 @@
+"""Fast computation utilities — Toeplitz matrix construction for convolutions."""
+
+from __future__ import annotations
+
 import numpy as np
 
 def get_recfield_for_pixel(r, c, matrix, kernel_shape):

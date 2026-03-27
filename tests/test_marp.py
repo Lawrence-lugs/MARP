@@ -1,23 +1,32 @@
-import numpy as np
-import pytest
-import marp.onnx_tools.onnx_utils as onnx_utils
-from marp.mapping import core
-from marp.mapping import packer_utils as pu
-import onnx
-import matplotlib
+"""Tests for the core MARP mapping and compilation pipeline."""
+
+from __future__ import annotations
+
 import os
-matplotlib.use('Agg')  # Use non-interactive backend for testing
+from pathlib import Path
+
+import matplotlib
 import matplotlib.pyplot as plt
-from marp.compile import compile
+import numpy as np
+import onnx
+import pytest
+
+matplotlib.use("Agg")  # Non-interactive backend for CI
+
+from marp.compile.compile import traverse_and_compile_nx_graph
+from marp.mapping.core import NxModelMapping, QRAccModel
+from marp.mapping.packer_utils import get_packer_by_type
+
+from .conftest import MODEL_DIR
 
 @pytest.fixture(params=[
-    'onnx_models/ad_quantized_int8.onnx',
-    'onnx_models/ks_quantized_int8.onnx',
-    'onnx_models/mbv2_cifar10_int8.onnx',
-    'onnx_models/ic_quantized_int8.onnx'
+    'ad_quantized_int8.onnx',
+    'ks_quantized_int8.onnx',
+    'mbv2_cifar10_int8.onnx',
+    'ic_quantized_int8.onnx'
 ])
 def modelpath(request):
-    return request.param
+    return str(MODEL_DIR / request.param)
 
 @pytest.fixture(params=[
     'Naive',
@@ -35,16 +44,16 @@ def u_marped(
     core_size=(256,256)
 ):
 
-    packer = pu.get_packer_by_type(packerName)
+    packer = get_packer_by_type(packerName)
     nx_model = onnx.load(modelpath)
 
-    u_marped = core.NxModelMapping(nx_model, imc_core_size=core_size, packer=packer)
+    u_marped = NxModelMapping(nx_model, imc_core_size=core_size, packer=packer)
         
     return u_marped
 
 @pytest.fixture
 def u_model(u_marped):
-    u_qracc = core.QRAccModel(
+    u_qracc = QRAccModel(
         u_marped,
         num_cores=1
     )
@@ -68,10 +77,9 @@ def test_plot_marp_save_to_file(u_marped, modelpath, packerName):
     assert os.path.exists(output_file)  # Check that file was created
 
 @pytest.mark.parametrize("modelpath", [
-    # 'onnx_models/mbv2_cifar10_int8.onnx', # Remove testing compile of mbv2- this is a waste of resources
-    'onnx_models/ad_quantized_int8.onnx',
-    'onnx_models/ks_quantized_int8.onnx',
-    'onnx_models/ic_quantized_int8.onnx'
+    str(MODEL_DIR / 'ad_quantized_int8.onnx'),
+    str(MODEL_DIR / 'ks_quantized_int8.onnx'),
+    str(MODEL_DIR / 'ic_quantized_int8.onnx'),
 ])
 @pytest.mark.parametrize("packerName", [
     'Naive',
@@ -81,7 +89,7 @@ def test_plot_marp_save_to_file(u_marped, modelpath, packerName):
 ])
 def test_traverse_and_compile_nx_graph(modelpath, packerName):
     nx_model = onnx.load(modelpath)
-    packer = pu.get_packer_by_type(packerName)
+    packer = get_packer_by_type(packerName)
     input_name = nx_model.graph.input[0].name
     input_shape = [d.dim_value for d in nx_model.graph.input[0].type.tensor_type.shape.dim]
     if input_shape[0] > 1:
@@ -90,7 +98,7 @@ def test_traverse_and_compile_nx_graph(modelpath, packerName):
     input_dict = {
         input_name: np.random.rand(*input_shape).astype(np.float32)
     }
-    commands = compile.traverse_and_compile_nx_graph(
+    commands = traverse_and_compile_nx_graph(
         nx_model      = nx_model,
         input_dict    = input_dict,
         imc_core_size = (256, 256),

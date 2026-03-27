@@ -1,16 +1,20 @@
-#%%
+from __future__ import annotations
 
-import rectpack
-import matplotlib.pyplot as plt
-from matplotlib import patches
 import os
-from tqdm import tqdm
-from PIL import Image
-import numpy as np
 
-def get_packer_by_type(packername):
+import matplotlib.pyplot as plt
+import numpy as np
+import rectpack
+from matplotlib import patches
+from PIL import Image
+from tqdm import tqdm
+
+from marp.constants import DEFAULT_CORE_SIZE
+
+def get_packer_by_type(packername: str):
+    """Return a packer instance for *packername* (Naive/Dense/Balanced/WriteOptimized)."""
     if packername == 'Naive':
-        return NaiveRectpackPacker(256, 256)
+        return NaiveRectpackPacker(*DEFAULT_CORE_SIZE)
     elif packername == 'Dense':
         return rectpack.newPacker(
             mode=rectpack.PackingMode.Offline,
@@ -35,7 +39,14 @@ def get_packer_by_type(packername):
     else:
         raise ValueError(f"Unknown packer name: {packername}")
 
-def get_packer(naive : bool, offline : bool, bin_algo : str, pack_algo : str, sort_algo : str, core_size : tuple = None):
+def get_packer(
+    naive: bool,
+    offline: bool,
+    bin_algo: str,
+    pack_algo: str,
+    sort_algo: str,
+    core_size: tuple[int, int] | None = None,
+):
 
     bin_algo_map = {
         'BBF': rectpack.PackingBin.BBF,
@@ -72,7 +83,7 @@ def get_packer(naive : bool, offline : bool, bin_algo : str, pack_algo : str, so
     if naive and core_size is not None:
         return NaiveRectpackPacker(core_size[0], core_size[1], rotation=False)
     elif naive:
-        return NaiveRectpackPacker(256, 256, rotation=False)
+        return NaiveRectpackPacker(*DEFAULT_CORE_SIZE, rotation=False)
 
     return rectpack.newPacker(
         bin_algo=bin_algo_map[bin_algo],
@@ -283,14 +294,13 @@ def combine_bin_pictures(name : str,
 
     result.save(name + '.png')
 
-class NaiveRectpackPacker(object):
-    '''
-    Naive rectpack packer that packs one rectangle in each bin.
-    For example, if you have 10 rectangles, it will create 10 bins
-    with one rectangle each. This class mimics the behavior of a
-    rectpack.Packer object.
-    '''
-    def __init__(self, bin_width, bin_height, rotation=False):
+class NaiveRectpackPacker:
+    """Baseline packer that puts each rectangle in its own bin.
+
+    Mimics the ``rectpack.Packer`` interface so it can be used as a
+    drop-in replacement in :class:`~marp.mapping.core.NxModelMapping`.
+    """
+    def __init__(self, bin_width: int, bin_height: int, rotation: bool = False) -> None:
         self.bin_width = bin_width
         self.bin_height = bin_height
         self._rectangles = []

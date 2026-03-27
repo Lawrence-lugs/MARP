@@ -1,12 +1,19 @@
-import numpy as np 
+"""Test-stimulus generation for QRAcc RTL verification."""
+
+from __future__ import annotations
+
 import os
-from ..quantization import quant
-from ..onnx_tools import onnx_utils
-from ..compile import compute
+
+import numpy as np
 import onnx
-import torch.nn.functional as F
-import torch 
 import rectpack
+import torch
+import torch.nn.functional as F
+
+from marp.compile import compute
+from marp.constants import DWC_CORE_SIZE, NUM_BANK_COLS
+from marp.onnx_tools import onnx_utils
+from marp.quantization import quant
 
 def _hex_but_no_0x(x):
     return hex(x)[2:]
@@ -251,7 +258,7 @@ def map_single_matrix(matrix, core_shape, x_offset = 0, y_offset = 0, randomize 
 
     return matrix_map
 
-def mapped_matrix_to_bank_writes(matrix_map, num_bank_cols = 32):
+def mapped_matrix_to_bank_writes(matrix_map, num_bank_cols=NUM_BANK_COLS):
 
     matrix_map_banked = matrix_map.reshape(-1, num_bank_cols)
     write_array = quant.array_bin_to_int(matrix_map_banked.T[::-1].T)
@@ -324,6 +331,14 @@ def write_input_files(res_dict, savepath):
                 np.savetxt(f'{savepath}/{key}.txt', value.flatten(), fmt='%s')
             np.savetxt(f'{savepath}/{key}_shape.txt', value.shape, fmt='%d')
 
+
+# ---------------------------------------------------------------------------
+# Legacy functions below are retained for backward compatibility but are NOT
+# used by the main MARP pipeline.  They reference an older API of
+# ``sample_onnx_qlinearconv`` and may not work without adaptation.
+# ---------------------------------------------------------------------------
+
+
 def generate_qracc_words(
     savepath,
     stride,
@@ -361,7 +376,7 @@ def generate_qracc_words(
     else:
         kernel = t_matrix
         kernel_hwc = kernel.transpose(1,2,3,0)
-        write_array = kernel_to_writes(kernel_hwc, 32, hexes=False)
+        write_array = kernel_to_writes(kernel_hwc, DWC_CORE_SIZE, hexes=False)
 
     scaler_data = pad_scaler_writes(scaler_params['scale'], 
                                         core_shape=core_shape,
@@ -439,7 +454,7 @@ def generate_top_inputs(
 
     print(f'matrix_map = map_single_matrix({t_matrix}, {core_shape}, x_offset={mm_offset_x}, y_offset={mm_offset_y})')
     matrix_map = map_single_matrix(t_matrix, core_shape, x_offset=mm_offset_x, y_offset=mm_offset_y)
-    write_array = mapped_matrix_to_bank_writes(matrix_map,32)
+    write_array = mapped_matrix_to_bank_writes(matrix_map, NUM_BANK_COLS)
 
     # Software padding and channel minor
     t_ifmap = torch.from_numpy(t_ifmap)
