@@ -1,0 +1,27 @@
+name: CI (devcontainer)
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build devcontainer image
+        run: |
+          docker build \
+            --file .devcontainer/Dockerfile \
+            --tag marp-devcontainer:ci \
+            .
+
+      - name: Run pytest inside container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspaces/MARP" \
+            -w /workspaces/MARP \
+            -e MPLBACKEND=Agg \
+            -e PYTHONPATH=/workspaces/MARP \
+            marp-devcontainer:ci \
+            pytest tests/
