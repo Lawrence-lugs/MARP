@@ -1,6 +1,6 @@
 # MARP
 
-**Mapping Accelerator for Reconfigurable Packing** — rectangular bin-packing algorithms that pack multiple DNN layers into a single weight matrix written onto Analog In-Memory Computing (AIMC) arrays.  MARP reduces the number of AIMC cores needed to fully map models **or** reduces the number of weight writes during a full-model inference.
+**Mappings for Analog AI Accelerators with Rectangular Packing** — rectangular bin-packing algorithms that pack multiple DNN layers into a single weight matrix written onto Analog In-Memory Computing (AIMC) arrays.  MARP reduces the number of AIMC cores needed to fully map models **or** reduces the number of weight writes during a full-model inference.
 
 MARP is a subset of the functionalities in the [hardware accelerator design garage](https://github.com/Lawrence-lugs/hwacc_design_garage).
 
