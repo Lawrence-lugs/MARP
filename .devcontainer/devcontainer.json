@@ -29,5 +29,5 @@
     //     "PYTHONPATH": "/workspace",
     //     "MPLBACKEND": "Agg"
     // },
-    "postCreateCommand": "echo 'Dev container ready. Run: pytest tests/' "
+    "postCreateCommand": "pip install -e third_party/zigzag && pip install -e '.[dev]' && echo 'Dev container ready. Run: pytest tests/'"
 }

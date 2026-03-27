@@ -8,6 +8,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build devcontainer image
         run: |
@@ -22,6 +24,5 @@ jobs:
             -v "${{ github.workspace }}:/workspaces/MARP" \
             -w /workspaces/MARP \
             -e MPLBACKEND=Agg \
-            -e PYTHONPATH=/workspaces/MARP \
             marp-devcontainer:ci \
-            pytest tests/
+            bash -c "git config --global --add safe.directory /workspaces/MARP && pip install -e third_party/zigzag && pip install -e '.[dev]' && pytest tests/"

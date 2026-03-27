@@ -34,8 +34,14 @@ RUN conda env create -f /tmp/environment.yml \
 ENV PATH="/opt/miniforge/envs/marp/bin:${PATH}"
 RUN echo "conda activate marp" >> /root/.bashrc
 
+# ── Install marp as editable package ──────────────────────────────────────────
+COPY pyproject.toml README.md /tmp/marp_src/
+COPY marp/ /tmp/marp_src/marp/
+COPY third_party/ /tmp/marp_src/third_party/
+RUN pip install -e /tmp/marp_src/third_party/zigzag \
+    && pip install -e "/tmp/marp_src[dev]" \
+    && pip cache purge
+
 # ── Runtime configuration ────────────────────────────────────────────────────
 # Use non-interactive Matplotlib backend (no display needed)
 ENV MPLBACKEND=Agg
-
-# WORKDIR /workspace

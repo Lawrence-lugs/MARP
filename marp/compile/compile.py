@@ -1,9 +1,41 @@
+from __future__ import annotations
+
+import pathlib
+
 import numpy as np
-from .stimulus_gen import *
 import onnx
-from ..onnx_tools import onnx_utils
-from ..mapping import core
-from ..compile import compute
+
+from marp.compile import compute
+from marp.compile.stimulus_gen import (
+    infer_ofmap_shape,
+    infer_optimal_adc_range_shifts,
+    mapped_matrix_to_bank_writes,
+    kernel_to_writes,
+    pack_ifmap_to_ints,
+    pad_bias_data,
+    pad_scaler_writes,
+    sample_onnx_qlinearconv,
+    vhex3,
+    write_input_files,
+)
+from marp.constants import (
+    CSR_BASE_ADDR_HEX,
+    CSR_REG_CHANNELS,
+    CSR_REG_CONFIG,
+    CSR_REG_IFMAP_DIMS,
+    CSR_REG_OFMAP_DIMS,
+    CSR_REG_OFFSETS,
+    CSR_REG_PADDING,
+    DATA_WRITE_ADDR,
+    DEFAULT_CORE_SIZE,
+    DWC_CORE_SIZE,
+    MASK_1,
+    MASK_4,
+    MASK_16,
+    TRIGGER_ENUM_MAP,
+)
+from marp.mapping import core
+from marp.onnx_tools import onnx_utils
 
 class QrAccNodeCode(object):
     '''
@@ -11,7 +43,17 @@ class QrAccNodeCode(object):
     Mappings and reference output attributes are NCHW
     '''
 
-    def __init__(self, mapped_node : core.MappedNode, mapped_bin : core.MappedBin, ifmap, imc_core_size = (256,256), ws_core_size = 32, ifmap_bits = 8, ofmap_bits = 8, nx_model : onnx.ModelProto = None):
+    def __init__(
+        self,
+        mapped_node: core.MappedNode,
+        mapped_bin: core.MappedBin | None,
+        ifmap: np.ndarray,
+        imc_core_size: tuple[int, int] = DEFAULT_CORE_SIZE,
+        ws_core_size: int = DWC_CORE_SIZE,
+        ifmap_bits: int = 8,
+        ofmap_bits: int = 8,
+        nx_model: onnx.ModelProto | None = None,
+    ) -> None:
 
         self.ifmap = ifmap if ifmap.ndim == 4 else ifmap.reshape((1, -1, 1, 1))
 
@@ -31,8 +73,7 @@ class QrAccNodeCode(object):
         self.mapped_bin = mapped_bin
         self.mapped_node = mapped_node
 
-        # if nx_model is None:
-        if 0:
+        if nx_model is None:
             self.reference_output = self._generate_reference_output()[0].transpose((0, 2, 3, 1))  # Convert to NHWC format
         else:
             output_tensor = mapped_node.nx_node.output[0]
@@ -236,7 +277,15 @@ class QrAccNodeCode(object):
             name=self.mapped_node.name,
         )        
     
-    def compile(self, include_ifmap_writes=True, write_weights=True, add_read=True, config_write_address='00000010', end=True, preserve_ifmap=False):
+    def compile(
+        self,
+        include_ifmap_writes: bool = True,
+        write_weights: bool = True,
+        add_read: bool = True,
+        config_write_address: str = CSR_BASE_ADDR_HEX,
+        end: bool = True,
+        preserve_ifmap: bool = False,
+    ) -> list[str]:
         '''
         Compile the node into a list of assembly instructions for QRAcc.
         include_ifmap_writes: bool, whether to include ifmap writes in the output.
@@ -322,103 +371,88 @@ def is_nx_node_compilable(
         return False
 
 def make_trigger_write(
-    command,
-    clear=0,
-    inst_write_mode=0,
-    csr_main_trigger_enum=None,
-    write_address='00000010',  # Default CSR base address for MAIN
-    preserve_ifmap=False  # Used for successive nodes that use the same ifmap
-):
+    command: str,
+    clear: int = 0,
+    inst_write_mode: int = 0,
+    csr_main_trigger_enum: dict[str, int] | None = None,
+    write_address: str = CSR_BASE_ADDR_HEX,
+    preserve_ifmap: bool = False,
+) -> list[str]:
+    """Build a single LOAD instruction that writes a trigger word to the CSR.
+
+    Args:
+        command: Trigger name (e.g. ``'TRIGGER_COMPUTE_ANALOG'``).
+        clear: Clear bit (0 or 1).
+        inst_write_mode: Instruction write-mode bit.
+        csr_main_trigger_enum: Optional custom trigger→value mapping.
+        write_address: Hex-string target address.
+        preserve_ifmap: If *True* the ifmap is kept in ACTMEM.
     """
-    command: string, one of possible triggers in qracc_pkg.svh
-    clear: 0 or 1, sets the clear bit
-    inst_write_mode: 0 or 1, sets the inst_write_mode bit
-    csr_main_trigger_enum: optional dict mapping string to value, otherwise uses default mapping
-    write_address: hex string, address to write to (default 0x10)
-    """
-    # Default mapping from qracc_pkg.svh
     if csr_main_trigger_enum is None:
-        csr_main_trigger_enum = {
-            'TRIGGER_IDLE': 0,
-            'TRIGGER_LOAD_ACTIVATION': 1,
-            'TRIGGER_LOADWEIGHTS': 2,
-            'TRIGGER_COMPUTE_ANALOG': 3,
-            'TRIGGER_COMPUTE_DIGITAL': 4,
-            'TRIGGER_READ_ACTIVATION': 5,
-            'TRIGGER_LOADWEIGHTS_DIGITAL': 6,
-            'TRIGGER_LOAD_SCALER': 7
-        }
+        csr_main_trigger_enum = TRIGGER_ENUM_MAP
     if command not in csr_main_trigger_enum:
         raise ValueError(f"Unknown command: {command}")
 
     trigger_val = csr_main_trigger_enum[command] & 0x7
-    clear_val = (clear & 0x1) << 3
-    inst_write_mode_val = (inst_write_mode & 0x1) << 5
-    preserve_ifmap_val = (preserve_ifmap & 0x1) << 12  # Preserve ifmap bit
+    clear_val = (clear & MASK_1) << 3
+    inst_write_mode_val = (inst_write_mode & MASK_1) << 5
+    preserve_ifmap_val = (int(preserve_ifmap) & MASK_1) << 12
 
     word = trigger_val | clear_val | inst_write_mode_val | preserve_ifmap_val
     return [f'LOAD {write_address} {word:08x}']
 
 def bundle_config_into_write(
-    config_dict,
-    config_write_address = '00000010' # in hex, base address for CSR
-):
-    # CSR register addresses (offsets from base)
-    CSR_REG_CONFIG      = 1
-    CSR_REG_IFMAP_DIMS  = 2
-    CSR_REG_OFMAP_DIMS  = 3
-    CSR_REG_CHANNELS    = 4
-    CSR_REG_OFFSETS     = 5
-    CSR_REG_PADDING     = 6
-
+    config_dict: dict[str, int],
+    config_write_address: str = CSR_BASE_ADDR_HEX,
+) -> list[str]:
+    """Pack QRAcc configuration fields into six 32-bit CSR LOAD instructions."""
     base_addr = int(config_write_address, 16)
 
-    # Pack fields into 32-bit words
     config_word = (
-        ((config_dict['n_output_bits_cfg']      & 0xF) << 28) |
-        ((config_dict['n_input_bits_cfg']       & 0xF) << 24) |
-        ((config_dict['stride_y']               & 0xF) << 20) |
-        ((config_dict['stride_x']               & 0xF) << 16) |
-        ((config_dict['filter_size_x']          & 0xF) << 12) |
-        ((config_dict['filter_size_y']          & 0xF) << 8)  |
-        ((config_dict['adc_ref_range_shifts']   & 0xF) << 4)  |
-        ((config_dict['unsigned_acts']          & 0x1) << 1)  |
-        ((config_dict['binary_cfg']             & 0x1) << 0)
+        ((config_dict['n_output_bits_cfg']      & MASK_4) << 28) |
+        ((config_dict['n_input_bits_cfg']       & MASK_4) << 24) |
+        ((config_dict['stride_y']               & MASK_4) << 20) |
+        ((config_dict['stride_x']               & MASK_4) << 16) |
+        ((config_dict['filter_size_x']          & MASK_4) << 12) |
+        ((config_dict['filter_size_y']          & MASK_4) << 8)  |
+        ((config_dict['adc_ref_range_shifts']   & MASK_4) << 4)  |
+        ((config_dict['unsigned_acts']          & MASK_1) << 1)  |
+        ((config_dict['binary_cfg']             & MASK_1) << 0)
     )
     ifmap_dims_word = (
-        ((config_dict['input_fmap_dimy'] & 0xFFFF) << 16) |
-        ((config_dict['input_fmap_dimx'] & 0xFFFF) << 0)
+        ((config_dict['input_fmap_dimy'] & MASK_16) << 16) |
+        ((config_dict['input_fmap_dimx'] & MASK_16) << 0)
     )
     ofmap_dims_word = (
-        ((config_dict['output_fmap_dimy'] & 0xFFFF) << 16) |
-        ((config_dict['output_fmap_dimx'] & 0xFFFF) << 0)
+        ((config_dict['output_fmap_dimy'] & MASK_16) << 16) |
+        ((config_dict['output_fmap_dimx'] & MASK_16) << 0)
     )
     channels_word = (
-        ((config_dict['num_output_channels'] & 0xFFFF) << 16) |
-        ((config_dict['num_input_channels']  & 0xFFFF) << 0)
+        ((config_dict['num_output_channels'] & MASK_16) << 16) |
+        ((config_dict['num_input_channels']  & MASK_16) << 0)
     )
     offsets_word = (
-        ((config_dict['mapped_matrix_offset_y'] & 0xFFFF) << 16) |
-        ((config_dict['mapped_matrix_offset_x'] & 0xFFFF) << 0)
+        ((config_dict['mapped_matrix_offset_y'] & MASK_16) << 16) |
+        ((config_dict['mapped_matrix_offset_x'] & MASK_16) << 0)
     )
     padding_word = (
-        ((config_dict['padding_value'].astype(np.uint) & 0xFFFF) << 4) |
-        ((config_dict['padding'] & 0xFFFF) << 0)
+        ((int(config_dict['padding_value']) & MASK_16) << 4) |
+        ((config_dict['padding'] & MASK_16) << 0)
     )
 
-    # List of (address, hex_word) for each CSR
     config_writes = [
         f"LOAD {base_addr + CSR_REG_CONFIG:08x} {config_word:08x}",
         f"LOAD {base_addr + CSR_REG_IFMAP_DIMS:08x} {ifmap_dims_word:08x}",
         f"LOAD {base_addr + CSR_REG_OFMAP_DIMS:08x} {ofmap_dims_word:08x}",
         f"LOAD {base_addr + CSR_REG_CHANNELS:08x} {channels_word:08x}",
         f"LOAD {base_addr + CSR_REG_OFFSETS:08x} {offsets_word:08x}",
-        f"LOAD {base_addr + CSR_REG_PADDING:08x} {padding_word:08x}"  # Assuming padding is at CSR_REG_PADDING
+        f"LOAD {base_addr + CSR_REG_PADDING:08x} {padding_word:08x}",
     ]
-    
+
     return config_writes
 
-def write_array_to_asm(write_array, address='00000100'):
+def write_array_to_asm(write_array: np.ndarray | list, address: str = DATA_WRITE_ADDR) -> list[str]:
+    """Convert a data array into a list of LOAD assembly instructions."""
     asm = []
     for element in write_array:
         asm.append(f"LOAD {address} {vhex3(element)}")
@@ -604,21 +638,14 @@ def get_info_command(u_code):
     commands += ['ENDINFO']
     return commands
 
-def sanitize_name(name):
+def sanitize_name(name: str) -> str:
+    """Return a filesystem-safe version of *name* for use as a filename.
+
+    Strips everything except alphanumerics, hyphens, and underscores,
+    then resolves any remaining path tricks via ``pathlib``.
     """
-    Sanitize a node name to be used as filenames in the QRAcc testbench.
-    Removes special characters and directory traversal attempts.
-    Returns a safe string that can be used as a filename.
-    """
-    # Replace any chars that could be problematic in filenames
-    safe_chars = name.replace(' ', '_')
-    safe_chars = ''.join(c for c in safe_chars if c.isalnum() or c in '_-')
-    
-    # Prevent directory traversal attempts
-    safe_name = safe_chars.replace('..', '')
-    
-    # Avoid empty names
-    if not safe_name:
-        safe_name = 'node'
-        
-    return safe_name
+    safe = name.replace(' ', '_')
+    safe = ''.join(c for c in safe if c.isalnum() or c in '_-')
+    # Use pathlib to collapse any residual traversal components
+    safe = pathlib.PurePosixPath(safe).name
+    return safe or 'node'

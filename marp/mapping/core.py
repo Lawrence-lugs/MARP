@@ -1,5 +1,9 @@
-from . import packer_utils  as pu
-from ..onnx_tools import onnx_splitter
+from __future__ import annotations
+
+from marp.mapping import packer_utils as pu
+from marp.onnx_tools import onnx_splitter
+from marp.constants import DEFAULT_CORE_SIZE, DWC_CORE_SIZE
+
 import numpy as np
 import onnx
 import matplotlib.pyplot as plt
@@ -43,7 +47,9 @@ def _infer_flattened_matrix_from_kernel(kernel_shape):
 
     return xdim, ydim
 
-def _get_aimc_mapped_shapes_from_onnx(nx_model : onnx.ModelProto):
+def _get_aimc_mapped_shapes_from_onnx(
+    nx_model: onnx.ModelProto,
+) -> tuple[list[tuple[int, int, int]], dict[int, str]]:
     '''
     Returns a list of matrix shapes from an ONNX model
     and a dictionary of node IDs to name.
@@ -72,7 +78,7 @@ def _get_aimc_mapped_shapes_from_onnx(nx_model : onnx.ModelProto):
             nid_to_name[node_id] = node.name
     return shapes, nid_to_name
 
-def check_packing_success(packer, shapes):
+def check_packing_success(packer: rectpack.PackerBBF | pu.NaiveRectpackPacker, shapes: list) -> bool:
     '''
     Checks if the packing was successful by comparing the number of packed rectangles
     with the number of shapes.
@@ -84,7 +90,11 @@ def check_packing_success(packer, shapes):
         # print(f'Packing successful: packed {len(packer.rect_list())} vs {len(shapes)} matrices in cgraph in {len(packer)} bins')
         return True
     
-def pack_shapes_into_coresize_bins(packer, shapes, imc_core_size):
+def pack_shapes_into_coresize_bins(
+    packer: rectpack.PackerBBF | pu.NaiveRectpackPacker,
+    shapes: list[tuple[int, int, int]],
+    imc_core_size: tuple[int, int],
+) -> rectpack.PackerBBF | pu.NaiveRectpackPacker:
 
     packer.add_bin(*imc_core_size,count=float("inf"))
     packer = add_rects_to_packer(packer,shapes)
@@ -200,7 +210,7 @@ class MappedNode(object):
     '''
     Represents a QRAcc mapped ONNX QLinearConv or QLinearMatmul node with its matrix shape and ID
     '''
-    def __init__(self, nx_node : onnx.NodeProto, bin_id, mapped_rect, nx_model : onnx.ModelProto, offset_x = 0, offset_y = 0):
+    def __init__(self, nx_node: onnx.NodeProto, bin_id: int | None, mapped_rect, nx_model: onnx.ModelProto, offset_x: int = 0, offset_y: int = 0):
 
         self.depthwise = check_if_depthwise(nx_node)
 
@@ -213,6 +223,9 @@ class MappedNode(object):
             self.offset_x = offset_x
             self.offset_y = offset_y
         else:
+            # rectpack uses (x, y) = (column, row) while the MARP weight
+            # matrix is indexed as (row, column).  The swap maps between
+            # rectpack's coordinate system and the row-major layout.
             self.offset_x = mapped_rect.y
             self.offset_y = mapped_rect.x
 
@@ -279,19 +292,31 @@ class MappedNode(object):
         ]
         return "MappedQRAccNode(\n    " + "\n    ".join(attrs) + "\n)"
 
-class NxModelMapping(object):
-    '''
-    Maps an ONNX model to a cgraph and packs it into imc_core_size sized matrices
-    Must take in split onnx model already
-    '''
-    def __init__(self,
-                 nx_model : onnx.ModelProto,
-                 imc_core_size : tuple[int] = (256, 256),
-                 dwc_core_size : int = 32,
-                 packer = None,
-                 naive = False,
-                 **kwargs
-                 ):
+class NxModelMapping:
+    """Map an ONNX model's layers onto fixed-size AIMC cores via bin packing.
+
+    The constructor splits quantised convolution / matmul nodes so that each
+    sub-layer fits within *imc_core_size*, then packs the resulting weight
+    matrices into the fewest bins possible.
+
+    Args:
+        nx_model: A loaded ONNX ``ModelProto`` (int-8 quantised).
+        imc_core_size: ``(rows, columns)`` of each AIMC core.
+        dwc_core_size: Weight-storage width for depthwise cores.
+        packer: A ``rectpack`` packer instance, or *None* for the default.
+        naive: If *True*, use the naïve one-rect-per-bin baseline.
+        **kwargs: Forwarded to the packer constructor.
+    """
+
+    def __init__(
+        self,
+        nx_model: onnx.ModelProto,
+        imc_core_size: tuple[int, int] = DEFAULT_CORE_SIZE,
+        dwc_core_size: int = DWC_CORE_SIZE,
+        packer=None,
+        naive: bool = False,
+        **kwargs,
+    ) -> None:
         
         onnx_splitter.split_model_to_per_channel(nx_model.graph, C_max = imc_core_size[0], K_max = imc_core_size[1], dwC_max=dwc_core_size)
         nx_shapes, nid_to_name = _get_aimc_mapped_shapes_from_onnx(nx_model)
@@ -409,14 +434,22 @@ class NxModelMapping(object):
         self.plot()
         return f"NxModelMapping(nbins={self.nbins}, core_size={self.core_size})"
 
-class QRAccModel(object):
-    '''
-    Analytical model of a qracc accelerator
-    '''
-    def __init__(self,
-                 packed_cgraph : NxModelMapping,
-                 num_cores = 1
-                 ):
+class QRAccModel:
+    """Analytical cost model for a QRAcc accelerator.
+
+    Computes weight-bin utilisation and predicts the number of weight
+    rewrites during a full-model inference using an LFU eviction policy.
+
+    Args:
+        packed_cgraph: A fully packed :class:`NxModelMapping`.
+        num_cores: Number of physical AIMC cores available.
+    """
+
+    def __init__(
+        self,
+        packed_cgraph: NxModelMapping,
+        num_cores: int = 1,
+    ) -> None:
         
         self.packed_cgraph = packed_cgraph
         self.total_bins = len(packed_cgraph.packer)

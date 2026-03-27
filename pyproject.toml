@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marp"
+version = "0.1.0"
+description = "Mapping Accelerator for Reconfigurable Packing — bin-packing DNN layers onto AIMC arrays"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "MARP Contributors" }]
+keywords = ["AIMC", "bin-packing", "DNN", "accelerator", "ONNX"]
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "onnx>=1.15",
+    "onnxruntime",
+    "rectpack>=0.2.2",
+    "protobuf>=3.20",
+    "sty>=1.0",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib", "seaborn", "pillow"]
+ml = ["torch", "torchvision"]
+dev = [
+    "pytest",
+    "mypy",
+    "ruff",
+    "marp[viz,ml]",
+]
+
+[project.urls]
+Repository = "https://github.com/Lawrence-lugs/MARP"
+
+[tool.setuptools.packages.find]
+include = ["marp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
