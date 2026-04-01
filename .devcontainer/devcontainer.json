@@ -1,9 +1,8 @@
 {
     "name": "MARP",
-    "build": {
-        "dockerfile": "Dockerfile",
-        "context": ".."
-    },
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "marp",
+    "workspaceFolder": "/workspaces/MARP",
     // "workspaceFolder": "/workspace",
     "customizations": {
         "vscode": {
