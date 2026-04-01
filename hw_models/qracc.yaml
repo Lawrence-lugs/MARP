@@ -1,0 +1,160 @@
+# QRAcc – Charge-Redistribution In-Memory Computing Accelerator
+#
+# Derived from the RTL at https://github.com/Lawrence-lugs/QrAccelerator
+# (rtl/qr_acc_top.sv, rtl/qracc_pkg.svh, rtl/qracc_params.svh)
+#
+# Architecture overview
+# ---------------------
+# - 256×256 analog IMC macro (8 banks of 256 rows × 32 columns each)
+# - 10T1C SRAM bitcell stores 1-bit weights; multi-bit weights span rows
+# - 4-bit ADC per column (charge redistribution)
+# - Bit-serial input: 1 activation bit per cycle → 8 cycles for 8-bit input
+# - 16-bit sequential accumulator per column
+# - 8-bit quantised output (fixed-point scaler)
+# - On-chip activation buffer (global buffer): 256 entries × 256 bits = 8 KB
+# - 32-bit external bus interface
+# - Also contains a 32-PE weight-stationary unit (WSAcc) for depthwise conv
+
+name: qracc
+
+memories:
+  # --- Level 0: SRAM cells (weights stored in-memory) ---
+  cells:
+    size: 8                           # bits per weight element
+    r_cost: 0                         # IMC – read is free (part of compute)
+    w_cost: 0.095                     # SRAM write energy (pJ)
+    area: 0
+    latency: 0
+    operands: [I2]
+    ports:
+      - name: rw_port_1
+        type: read_write
+        bandwidth_min: 8
+        bandwidth_max: 8
+        allocation:
+          - I2, fh
+          - I2, tl
+    served_dimensions: []             # Fully unrolled across all PEs
+
+  # --- Level 0: Feature-loader register (input activations) ---
+  # The feature loader stages activation data for the IMC macro.
+  # One 8-bit element per input row.
+  rf_1B:
+    size: 8                           # 8 bits (one activation element)
+    r_cost: 0.021
+    w_cost: 0.021
+    area: 0
+    latency: 1
+    operands: [I1]
+    ports:
+      - name: r_port_1
+        type: read
+        bandwidth_min: 8
+        bandwidth_max: 8
+        allocation:
+          - I1, tl
+      - name: w_port_1
+        type: write
+        bandwidth_min: 8
+        bandwidth_max: 8
+        allocation:
+          - I1, fh
+    served_dimensions: [D1]           # Shared along input (row) dimension
+
+  # --- Level 0: Sequential accumulator register (partial sums / outputs) ---
+  # 16-bit accumulator per output column, stores partial MAC results.
+  rf_2B:
+    size: 16                          # 16 bits (accumulatorBits)
+    r_cost: 0.021
+    w_cost: 0.021
+    area: 0
+    latency: 1
+    operands: [O]
+    ports:
+      - name: r_port_1
+        type: read
+        bandwidth_min: 16
+        bandwidth_max: 16
+        allocation:
+          - O, tl
+      - name: r_port_2
+        type: read
+        bandwidth_min: 16
+        bandwidth_max: 16
+        allocation:
+          - O, th
+      - name: w_port_1
+        type: write
+        bandwidth_min: 16
+        bandwidth_max: 16
+        allocation:
+          - O, fh
+      - name: w_port_2
+        type: write
+        bandwidth_min: 16
+        bandwidth_max: 16
+        allocation:
+          - O, fl
+    served_dimensions: [D2]           # Shared along output (column) dimension
+
+  # --- Level 1: Global activation buffer (on-chip SRAM) ---
+  # Dual-ported buffer: 32-bit external interface, 256-bit internal interface.
+  # Depth = 256 entries, byte-addressable → 256 × 32 bytes = 8 KB = 65536 bits.
+  global_buffer_8KB:
+    size: 65536                       # 8 KB in bits
+    r_cost: 10.0                      # Estimated for 8 KB SRAM (pJ)
+    w_cost: 15.0
+    area: 0
+    latency: 1
+    operands: [I1, O]
+    ports:
+      - name: r_port_1
+        type: read
+        bandwidth_min: 32             # 32-bit external interface (min)
+        bandwidth_max: 256            # 256-bit internal interface (max)
+        allocation:
+          - I1, tl
+          - O, tl
+          - O, th
+      - name: w_port_1
+        type: write
+        bandwidth_min: 32
+        bandwidth_max: 256
+        allocation:
+          - I1, fh
+          - O, fh
+          - O, fl
+    served_dimensions: [D1, D2]
+
+  # --- Level 2: Off-chip DRAM ---
+  dram:
+    size: 10000000000                 # 10 GB
+    r_cost: 700
+    w_cost: 750
+    area: 0
+    latency: 1
+    operands: [I1, I2, O]
+    ports:
+      - name: rw_port_1
+        type: read_write
+        bandwidth_min: 32             # 32-bit external bus
+        bandwidth_max: 32
+        allocation:
+          - I1, fh
+          - I1, tl
+          - I2, fh
+          - I2, tl
+          - O, fh
+          - O, tl
+          - O, fl
+          - O, th
+    served_dimensions: [D1, D2]
+
+operational_array:
+  is_imc: True
+  imc_type: analog                    # Charge-redistribution analog compute
+  input_precision: [8, 8]            # [activation_bits, weight_bits]
+  bit_serial_precision: 1            # 1 bit per cycle (n cycles for n-bit)
+  adc_resolution: 4                  # 4-bit ADC per column
+  dimensions: [D1, D2]
+  sizes: [256, 256]                  # 256 rows × 256 columns (8 banks × 32)
