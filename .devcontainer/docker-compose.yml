@@ -6,3 +6,4 @@ services:
     image: marp-devcontainer
     volumes:
       - ..:/workspaces/MARP:cached
+    command: sleep infinity

@@ -1,7 +1,7 @@
 {
     "name": "MARP",
-    "dockerComposeFile": "docker-compose.yml",
-    "service": "marp",
+    //"dockerComposeFile": "docker-compose.yml",
+    "image": "ghcr.io/lawrence-lugs/marp/marp-tools:latest",
     "workspaceFolder": "/workspaces/MARP",
     // "workspaceFolder": "/workspace",
     "customizations": {
