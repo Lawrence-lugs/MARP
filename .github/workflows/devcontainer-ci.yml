@@ -61,27 +61,3 @@ jobs:
           pull: true
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
-
-  test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Build devcontainer image
-        run: |
-          docker build \
-            --file .devcontainer/Dockerfile \
-            --tag marp-devcontainer:ci \
-            .
-
-      - name: Run pytest inside container
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspaces/MARP" \
-            -w /workspaces/MARP \
-            -e MPLBACKEND=Agg \
-            marp-devcontainer:ci \
-            bash -c "git config --global --add safe.directory /workspaces/MARP && pip install -e third_party/zigzag && pip install -e '.[dev]' && pytest tests/"

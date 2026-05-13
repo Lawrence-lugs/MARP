@@ -1,0 +1,30 @@
+
+name: Test MARP
+
+on: [push, pull_request]
+
+env:
+  IMAGE: ghcr.io/lawrence-lugs/marp/marp-tools
+
+
+jobs:
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Pull container image
+        run: docker pull ${{ env.IMAGE }}:latest
+
+      - name: Run pytest inside container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspaces/MARP" \
+            -w /workspaces/MARP \
+            -e MPLBACKEND=Agg \
+            ${{ env.IMAGE }}:latest \
+            bash -c "git config --global --add safe.directory /workspaces/MARP && pip install -e third_party/zigzag && pip install -e '.[dev]' && pytest tests/"
