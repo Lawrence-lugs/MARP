@@ -1,9 +1,0 @@
-services:
-  marp:
-    build:
-      context: ..
-      dockerfile: .devcontainer/Dockerfile
-    image: marp-devcontainer
-    volumes:
-      - ..:/workspaces/MARP:cached
-    command: sleep infinity
