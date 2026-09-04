@@ -20,6 +20,12 @@ from onnx.onnx_pb import (
 )
 from PIL import Image
 from torchvision import transforms
+import threading
+
+# Thread-safe session cache
+_session_cache = {}
+_session_cache_lock = threading.Lock()
+
 
 def add_tensor_to_model_outputs(model, tensor_name):
     layer_value_info = helper.ValueInfoProto()
@@ -148,7 +154,12 @@ def get_intermediate_tensor_value(modelpath, tensor_name, input_dict=None):
     return infer(model, input_dict)[-1]
 
 def infer(nx_model, input_dict):
-    session = ort.InferenceSession(nx_model.SerializeToString())
+    """Run inference on an ONNX model, reusing a cached InferenceSession when possible."""
+    model_bytes = nx_model.SerializeToString()
+    with _session_cache_lock:
+        if model_bytes not in _session_cache:
+            _session_cache[model_bytes] = ort.InferenceSession(model_bytes)
+        session = _session_cache[model_bytes]
     outputs = session.run(None, input_dict)
     return outputs
 

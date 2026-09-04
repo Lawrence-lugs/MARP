@@ -18,11 +18,24 @@ from marp.quantization import quant
 def _hex_but_no_0x(x):
     return hex(x)[2:]
 
-def _hex3(n,hexits=8):
+
+def _hex3(n, hexits=8):
+    """Format integer as hex, taking last hexits characters.
+    
+    Works on both scalars and numpy arrays.
+    """
+    if isinstance(n, np.ndarray):
+        # Vectorized path for arrays - use list comprehension for speed
+        arr = np.asarray(n, dtype=np.uint32)
+        return np.array([_hex3(x, hexits) for x in arr.flat]).reshape(arr.shape)
+    # Scalar path
     return f"{(int(n) & 0xffffffff):08x}"[-hexits:]
 
-hex_but_no_0x = np.vectorize(_hex3)
-vhex3 = np.vectorize(_hex3)
+
+# Remove the np.vectorize wrappers that were the performance bottleneck
+# vhex3 and hex_but_no_0x are now proper functions
+vhex3 = _hex3  # Keep backward compatibility; _hex3 handles both scalars and arrays via isinstance check
+hex_but_no_0x = _hex_but_no_0x
 
 def kernel_to_writes(kernel, channels, hexes=True):
     '''

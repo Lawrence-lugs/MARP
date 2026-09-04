@@ -186,82 +186,119 @@ def scaling_quantized_convolution(a,w,outBits,internalPrecision, out_scale = Non
 
     return o_qtensor
     
-def convert_scale_to_shift_and_m0(scale,precision=16):
-    " Convert scale(s) to shift and zero point "
+def convert_scale_to_shift_and_m0(scale, precision=16):
+    """Convert scale(s) to shift and zero point, vectorized."""
+    if np.ndim(scale) == 0:
+        if scale == 0:
+            return np.float64(0.0), np.int64(0)
+        shift = int(np.ceil(np.log2(scale)))
+        m0 = scale / 2**shift
+        mask_one = m0 == 1.0
+        if mask_one:
+            m0 = 0.9999999999999999
+        x = int(np.floor(m0 * (2**precision)))
+        m0 = np.float64(x) / (2**precision)
+        return m0, np.int64(shift)
+    
+    scale = np.asarray(scale, dtype=np.float64)
+    zero_mask = scale == 0
+    shift = np.zeros_like(scale, dtype=np.int64)
+    m0 = np.zeros_like(scale, dtype=np.float64)
+    
+    nonzero = ~zero_mask
+    if np.any(nonzero):
+        scale_nz = scale[nonzero]
+        shift_vals = np.ceil(np.log2(scale_nz)).astype(np.int64)
+        shift[nonzero] = shift_vals
+        
+        pow_shift = np.power(2.0, shift_vals.astype(np.float64))
+        m0_raw = scale_nz / pow_shift
+        
+        mask_one = m0_raw == 1.0
+        m0_raw_clamped = m0_raw.copy()
+        m0_raw_clamped[mask_one] = 0.9999999999999999
+        
+        x = np.floor(m0_raw_clamped * (2**precision)).astype(np.int64)
+        m0[nonzero] = x.astype(np.float64) / (2**precision)
+    
+    return m0, shift
 
-    if scale == 0:
-        return 0, 0
+vconvert_scale_to_shift_and_m0 = convert_scale_to_shift_and_m0
 
-    shift = int(np.ceil(np.log2(scale)))
-    # shift = np.abs(shift)
-    m0 = scale / 2**shift
+def convert_to_fixed_point(number, precision):
+    """Convert a float (0,1) to fixed point binary string, vectorized."""
+    number = np.asarray(number)
+    # Handle number == 1 edge case (clamp to 0.999...)
+    mask_one = number == 1
+    number = number.copy()
+    number[mask_one] = 0.9999999999999999
+    
+    # Compute integer representation
+    x = np.floor(number * (2**precision)).astype(np.int64)
+    
+    # Vectorized binary representation using character operations
+    result = np.empty(x.shape, dtype=f'U{precision}')
+    for i in range(precision):
+        # Extract the i-th bit from the left (MSB first)
+        bit = ((x >> (precision - 1 - i)) & 1).astype(str)
+        if i == 0:
+            result[:] = bit  # Initialize with first bit
+        else:
+            result = np.char.add(result, bit)  # Append subsequent bits
+    
+    return result
 
-    fp_string = convert_to_fixed_point(m0,precision)
-    m0_clipped = fixed_point_to_float(fp_string,precision)
-    return m0_clipped, shift
+def convert_to_fixed_point_int(number, precision):
+    """Convert a float [0,1] to fixed point binary integer, vectorized."""
+    if np.ndim(number) == 0:
+        x = number * (2**precision)
+        return int(np.floor(x))
+    x = number * (2**precision)
+    return np.floor(x).astype(np.int64)
 
-vconvert_scale_to_shift_and_m0 = np.vectorize(convert_scale_to_shift_and_m0)
+vconvert_to_fixed_point_int = convert_to_fixed_point_int
 
-def convert_to_fixed_point(number,precision):
-    " Convert a float (0,1) to fixed point binary string"
-    if number == 1:
-        number = 0.9999999999999999
-    x = number*(2**precision)
-    x = np.floor(x).astype(int)
-    return np.binary_repr(x,width=precision)
+def fixed_point_to_float(number, precision):
+    """Convert a fixed point binary string to float [0,1], vectorized."""
+    number = np.asarray(number)
+    result = np.zeros(number.shape, dtype=np.float64)
+    for i in range(precision):
+        # Extract the i-th character from each string (vectorized)
+        # We can't use np.char.slice (doesn't exist), so iterate over the
+        # string array to build per-position character arrays.
+        chars = np.array([s[i] for s in number.flat], dtype='U1').reshape(number.shape)
+        bit = (chars == '1').astype(np.float64)
+        result += bit * (2.0 ** -(i + 1))
+    return result
 
-def convert_to_fixed_point_int(number,precision):
-    " Convert a float [0,1] to fixed point binary "
-    x = number*(2**precision)
-    x = np.floor(x).astype(int)
-    return x
+def _right_shift(number, shift):
+    """Right shift a number. Shifting rounds toward -infty, vectorized."""
+    return np.floor(number / 2.**(shift)).astype(np.int64)
 
-vconvert_to_fixed_point_int = np.vectorize(convert_to_fixed_point_int)
-
-def fixed_point_to_float(number,precision):
-    " Convert a fixed point binary string to float [0,1] "
-    # out = 0
-    # for i in range(precision):
-    #     out += int(number[i]) * 2**-(i+1)
-    if len(number) != precision:
-        raise ValueError('Number must be of length {}'.format(precision))
-    return int(number,2)*(2.**-(precision))
-
-def _right_shift(number,shift):
-    " Right shift a number. Shifting rounds toward -infty"
-    return int(np.floor(number / 2.**(shift)))
-
-right_shift = np.vectorize(_right_shift)
+right_shift = _right_shift
 
 def get_array_bits(array,signed=True):
     " Get the number of bits required to represent an array "
     return int(np.ceil(np.log2(np.abs(array).max())))+signed
 
-def _saturating_clip (num_i, inBits = 16, outBits = 8, signed = True):
+def _saturating_clip (num_i, inBits=16, outBits=8, signed=True):
     '''
-    Saturating clip.
+    Saturating clip, vectorized.
 
     This only implemented saturation before. Now it also clips.
     '''
-
-    # floor to round towards negative infinity
     num_i_shifted = right_shift(num_i, inBits - outBits)
 
     if signed:
-        min = -(2**(outBits-1))
-        max = 2**(outBits-1)-1
+        min_val = -(2**(outBits-1))
+        max_val = 2**(outBits-1)-1
     else:
-        min = 0
-        max = 2**outBits-1
-    
-    if(num_i_shifted < min):
-        return min
-    if(num_i_shifted > max):
-        return max
-    
-    return num_i_shifted
+        min_val = 0
+        max_val = 2**outBits-1
 
-saturating_clip = np.vectorize(_saturating_clip)
+    return np.clip(num_i_shifted, min_val, max_val)
+
+saturating_clip = _saturating_clip
 
 def binary_array_to_int(array,signed=False,outBits=None):
     ''' 
@@ -359,10 +396,12 @@ def as_packed_hex(
     Convert an array to a packed hex string.
     """
     a = array.flatten()
-    out = np.array([], dtype=str)
-
-    for i in range(0, len(a), wordSize // elementBits):
-        hex_str = ''.join([f'{int(x):02x}' for x in a[i:i + wordSize // elementBits]])
-        out = np.append(out, hex_str)
-
-    return out
+    chunk_size = wordSize // elementBits
+    
+    out = []
+    for i in range(0, len(a), chunk_size):
+        chunk = a[i:i + chunk_size]
+        hex_str = ''.join([f'{int(x):02x}' for x in chunk])
+        out.append(hex_str)
+    
+    return np.array(out, dtype=str)
