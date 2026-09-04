@@ -1,0 +1,53 @@
+name: Test (via cached container)
+
+on:
+  workflow_run:
+    workflows: ["CI (devcontainer)"]
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: read
+  
+
+env:
+  IMAGE: ghcr.io/lawrence-lugs/marp
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Determine image tag
+        id: tag
+        run: |
+          TAG="${{ github.event.workflow_run.head_branch }}-${{ github.event.workflow_run.head_sha }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull devcontainer image
+        run: |
+          docker pull \
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          submodules: recursive
+
+      - name: Run pytest inside container
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspaces/MARP" \
+            -w /workspaces/MARP \
+            -e MPLBACKEND=Agg \
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }} \
+            bash -c "git config --global --add safe.directory /workspaces/MARP && pip install -e third_party/zigzag && pip install -e '.[dev]' && pytest tests/"
